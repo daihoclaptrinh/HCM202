@@ -1,7 +1,7 @@
 import quizBank from '../data/quizBank.json'
 import { quizStations, stationRadius } from '../data/quizStations'
 
-export type AnswerResult = { index: number; choice: number; text?: string; correct: boolean; timedOut: boolean; explanation: string; openedAt: number; answeredAt: number; elapsedMs: number }
+export type AnswerResult = { index: number; choice: number; text?: string; correct: boolean; timedOut: boolean; abandoned: boolean; explanation: string; openedAt: number; answeredAt: number; elapsedMs: number }
 export type Member = { id: string; name: string; avatar: number; host: boolean; joinedAt: number }
 export type Player = { id: string; name: string; avatar: number; activeQuestion: number | null; questionOpenedAt: number; questionDeadline: number; status: 'waiting' | 'playing' | 'lost' | 'finished'; score: number; correctTimeMs: number; answeredCount: number; answers: AnswerResult[]; listened: number[]; reason?: string; position: { x: number; z: number; yaw: number } }
 export type Room = { code: 'HCM202'; sessionId: string; hostId: string; phase: 'waiting' | 'playing' | 'ended'; startedAt: number; endedAt: number; serverTime: number; version: number; players: Player[] }
@@ -39,18 +39,21 @@ export class GameRoom {
     return changed
   }
   private revise() { this.room.version++; this.room.serverTime = this.now() }
-  private lose(player: Player, reason: string) { player.status = 'lost'; player.activeQuestion = null; player.questionDeadline = 0; player.reason = reason }
-  private answer(player: Player, choice: number, text: string, at = this.now(), timeout = false) {
+  private lose(player: Player, reason: string) {
+    if (player.activeQuestion !== null) this.answer(player, -1, '', this.now(), false, true)
+    player.status = 'lost'; player.activeQuestion = null; player.questionDeadline = 0; player.reason = reason
+  }
+  private answer(player: Player, choice: number, text: string, at = this.now(), timeout = false, abandoned = false) {
     if (player.activeQuestion === null || player.status !== 'playing') return false
     const index = player.activeQuestion, question = quizBank[Math.floor(index / 6)][index % 6]
     timeout ||= at >= player.questionDeadline
-    if (!timeout && (!Number.isInteger(choice) || choice < 0 || choice > 3)) return false
+    if (!timeout && !abandoned && (!Number.isInteger(choice) || choice < 0 || choice > 3)) return false
     const normalized = text.trim()
-    if (!timeout && choice === 3 && !/^\d{1,4}$/.test(normalized)) return false
-    const correct = !timeout && (choice === 3 ? 'manualAnswer' in question && Number(normalized) === Number(question.manualAnswer) : choice === question.answer)
+    if (!timeout && !abandoned && choice === 3 && !/^\d{1,4}$/.test(normalized)) return false
+    const correct = !timeout && !abandoned && (choice === 3 ? 'manualAnswer' in question && Number(normalized) === Number(question.manualAnswer) : choice === question.answer)
     const answeredAt = timeout ? player.questionDeadline : at
     const elapsedMs = Math.max(0, Math.round(answeredAt - player.questionOpenedAt))
-    player.answers.push({ index, choice: timeout ? -1 : choice, text: choice === 3 ? normalized : undefined, correct, timedOut: timeout, explanation: question.explanation, openedAt: player.questionOpenedAt, answeredAt, elapsedMs })
+    player.answers.push({ index, choice: timeout || abandoned ? -1 : choice, text: choice === 3 ? normalized : undefined, correct, timedOut: timeout, abandoned, explanation: question.explanation, openedAt: player.questionOpenedAt, answeredAt, elapsedMs })
     player.answeredCount = player.answers.length
     if (correct) { player.score += 100; player.correctTimeMs += elapsedMs }
     player.activeQuestion = null; player.questionDeadline = 0; player.questionOpenedAt = 0
@@ -92,11 +95,15 @@ export class GameRoom {
       const index = Number(message.index)
       if (!Number.isInteger(index) || index < 0 || index >= 30 || player.activeQuestion !== null || player.answers.some(answer => answer.index === index)) return false
       const station = quizStations[Math.floor(index / 6)]
+      const firstUnanswered = quizBank[station.stage].findIndex((_question, question) => !player.answers.some(answer => answer.index === station.stage * 6 + question))
+      if (!player.listened.includes(station.stage + 1) || index !== station.stage * 6 + firstUnanswered) return false
       if (Math.hypot(player.position.x - station.x, player.position.z - station.z) > stationRadius) return false
       player.activeQuestion = index; player.questionOpenedAt = this.now()
       player.questionDeadline = player.questionOpenedAt + stageSeconds[Math.floor(index / 6)] * 1000
     } else if (message.type === 'answer') {
       if (Number(message.index) !== player.activeQuestion || !this.answer(player, Number(message.choice), String(message.text ?? ''))) return false
+    } else if (message.type === 'forfeitQuestion') {
+      if (Number(message.index) !== player.activeQuestion || !this.answer(player, -1, '', this.now(), false, true)) return false
     } else return false
     this.revise(); return true
   }

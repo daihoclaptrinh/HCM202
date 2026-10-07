@@ -31,7 +31,7 @@ export class Multiplayer {
     if (generation !== this.generation) throw new Error('Đã hủy vào phòng.')
     this.id = crypto.randomUUID()
     const member: Member = { id: this.id, name: name.slice(0, 24), avatar, host, joinedAt: Date.now() }
-    const channel = client.channel(`${import.meta.env.VITE_SUPABASE_REALTIME_TOPIC || 'hcm202'}-free-v2`, { config: { presence: { key: this.id }, broadcast: { ack: true, self: false } } })
+    const channel = client.channel(`${import.meta.env.VITE_SUPABASE_REALTIME_TOPIC || 'hcm202'}-listened-v3`, { config: { presence: { key: this.id }, broadcast: { ack: true, self: false } } })
     this.channel = channel
     channel.on('presence', { event: 'sync' }, () => this.syncPresence())
       .on('broadcast', { event: 'state' }, ({ payload }) => this.receiveState(payload))

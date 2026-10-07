@@ -46,7 +46,7 @@
 #quiz-timer{font-size:18px;font-weight:bold;color:#e3bd83}#quiz-timer.urgent{color:#ff9f8d}#manual-answer{display:block;max-width:150px;width:100%;margin-top:6px;padding:10px;background:#211b17;color:#f0e9dd;border:1px solid #b7986c;font-size:18px}#answer-other{font-size:12px;padding:10px;margin-top:6px}#answer-other[aria-pressed=true]{background:#b7986c;color:#211b17}
 .host-screen #start .instructions{display:none}.host-screen #scoreboard{bottom:28px}.competition-active #guided-controls{display:none!important}#host-entry{width:min(530px,100%);margin:24px auto 0}#host-entry #start-button{width:100%;margin-top:18px}#host-roster{max-height:160px;overflow:auto;font-size:14px;color:#dac7aa}#host-status{line-height:1.6;font-size:14px}.lobby>label input{width:100%;padding:10px 12px;border:1px solid #6a5137;background:#211b17;color:#f0e9dd;font:inherit;border-radius:3px}
 #lobby-roster{max-height:120px;overflow:auto;font-size:12px}#lobby-roster p{margin:6px 0}
-#stage-questions{-webkit-user-select:none;user-select:none}#stage-questions input[type=text],#stage-questions textarea{-webkit-user-select:text;user-select:text}
+#stage-questions{-webkit-user-select:none;user-select:none}#stage-questions input[type=text],#stage-questions textarea{-webkit-user-select:none;user-select:none}
 /* Free exploration and host session controls. */
 #question-hunt { position: fixed; left: 20px; bottom: 20px; z-index: 14; width: min(330px, calc(100vw - 32px)); padding: 16px; background: #17130fed; border: 1px solid #a48252; border-radius: 6px; font-size: 12px; line-height: 1.65; }
 #question-hunt p { margin: 0 0 10px; }
@@ -97,3 +97,10 @@
   .ranking-table { font-size: 11px; }
   .ranking-table th, .ranking-table td { padding: 8px 4px; }
 }
+#question-blocker { position: fixed; inset: 0; z-index: 24; background: #080604a6; backdrop-filter: blur(3px); }
+#question-panel { top: 50%; left: 50%; right: auto; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 24px; }
+#question-panel, #hunt-feedback { -webkit-user-select: none; user-select: none; }
+#hunt-feedback { max-height: 130px; overflow-y: auto; color: #e3bd83; }
+#question-panel input[type=text] { -webkit-user-select: none; user-select: none; }
+#hunt-feedback:empty { display: none; }
+@media (max-width: 600px) { #question-panel { top: 50%; right: auto; max-height: calc(100dvh - 32px); } }

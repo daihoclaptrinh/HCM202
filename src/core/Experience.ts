@@ -45,6 +45,7 @@ export class Experience {
   private reportedLessons = new Set<number>()
   private roomSignature = ''
   private sessionId = ''
+  private forfeitedQuestion = ''
   private visitMode: 'free' | 'guided' = 'free'
   private guidedSteps: GuidedStep[] = []
   private guidedIndex = -1
@@ -69,7 +70,7 @@ export class Experience {
       newSession: () => this.multiplayer.send({ type: 'reset' }),
       downloadResults: () => this.multiplayer.downloadResults(),
       openQuestion: index => {
-        if (!this.gameActive) return
+        if (!this.gameActive || !this.audio.hasCompleted(audioAssets.narration[Math.floor(index / 6) + 1]) || document.hidden) return
         this.multiplayer.send({ type: 'position', x: this.camera.position.x, z: this.camera.position.z, yaw: this.camera.rotation.y })
         this.multiplayer.send({ type: 'openQuestion', index })
       },
@@ -97,6 +98,8 @@ export class Experience {
       },
       submitAnswer: (stage, index, choice, text) => {
         if (!this.gameActive || this.multiplayer.me?.activeQuestion !== stage * 6 + index) return
+        const me = this.multiplayer.me
+        if (document.hidden || !document.hasFocus() || this.forfeitedQuestion === `${this.sessionId}:${me.activeQuestion}:${me.questionOpenedAt}`) { this.forfeitCurrentQuestion(); return }
         this.multiplayer.send({ type: 'answer', index: stage * 6 + index, choice, text })
       }
     })
@@ -118,6 +121,11 @@ export class Experience {
     this.museum = new Museum(this.scene, this.collisions)
     this.visitors = new Visitors(this.scene)
     window.addEventListener('resize', () => this.resize()); window.addEventListener('keydown', (event) => this.keydown(event))
+    window.addEventListener('blur', () => this.forfeitCurrentQuestion())
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.forfeitCurrentQuestion() })
+    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) this.forfeitCurrentQuestion() })
+    window.addEventListener('beforeunload', () => this.forfeitCurrentQuestion())
+    window.addEventListener('popstate', () => this.forfeitCurrentQuestion())
     void this.load(); this.renderer.setAnimationLoop(() => this.update())
   }
 
@@ -161,7 +169,7 @@ export class Experience {
     const delta = Math.min(this.clock.getDelta(), .05)
     this.ui.updateQuizTimer(this.multiplayer.me?.questionDeadline ?? 0, this.multiplayer.serverNow)
     if (this.started && !this.guided) this.updateNarrationZone()
-    this.controls.enabled = this.started && !this.ui.panelOpen && !this.guided
+    this.controls.enabled = this.started && !this.ui.panelOpen && !this.guided && !this.ui.questionOpen
     if (this.guided) {
       if (!this.tourPaused && !this.ui.panelOpen && !document.hidden) this.updateGuidedTour(delta)
     } else this.controls.update(delta)
@@ -550,7 +558,7 @@ export class Experience {
     const title = this.lessonIndex === 0 ? 'Mở đầu hành trình' : chapter ? chapter.period : 'Kết luận'
     this.ui.showLesson(title, true, this.gameActive ? [] : (chapter ?? chapters[0]).artifacts, this.guided)
     this.ui.markListened(listened)
-    this.ui.setLessonInstruction(listened ? 'Đã nghe xong. Bạn có thể tự do khám phá các khu khác.' : 'Nghe chuyện là tùy chọn. Bạn vẫn được đi lại và tìm câu hỏi ở bất kỳ khu nào.')
+    this.ui.setLessonInstruction(listened ? 'Đã nghe xong. Đến biển ? của khu này để trả lời lần lượt câu 1 đến 6.' : 'Phải nghe hết nội dung khu này mới được trả lời câu hỏi. Bạn vẫn có thể đi lại khi nghe.')
     if (this.sightseeing) this.ui.setLessonInstruction(listened ? 'Đã nghe xong. Tiếp tục khám phá theo nhịp của bạn.' : 'Bấm nghe để tìm hiểu thêm, hoặc tiếp tục tham quan khi bạn muốn.')
     if (this.gameActive) {
       this.ui.setNarrationControl(!!this.audio.snapshot.path)
@@ -565,7 +573,7 @@ export class Experience {
     if (this.sightseeing) return
     if (this.sessionId && this.sessionId !== room.sessionId && room.phase === 'waiting') {
       this.gameActive = false; this.started = false; this.eliminated = false
-      this.reportedLessons.clear(); this.roomSignature = ''; this.restart(false); this.audio.setMuted(false); this.ui.resetSession()
+      this.reportedLessons.clear(); this.roomSignature = ''; this.forfeitedQuestion = ''; this.restart(false); this.audio.setMuted(false); this.ui.resetSession()
     }
     this.sessionId = room.sessionId
     this.ui.showRoom(room, this.multiplayer.id)
@@ -587,6 +595,7 @@ export class Experience {
     if (me.status === 'lost') { this.loseGame(me.reason ?? 'Lượt chơi đã kết thúc.'); return }
     const signature = `${me.activeQuestion}:${me.answers.length}:${me.listened.join(',')}`
     if (signature !== this.roomSignature) { this.roomSignature = signature; this.refreshLesson(); this.ui.showCompetitionQuestions(me, this.nearbyQuestionStage()) }
+    if (me.activeQuestion !== null && (document.hidden || !document.hasFocus())) this.forfeitCurrentQuestion()
   }
 
   private loseGame(reason: string) {
@@ -596,6 +605,16 @@ export class Experience {
     this.controls.enabled = false; this.controls.movementLocked = true
     this.multiplayer.send({ type: 'lose' }); this.audio.stopNarration(); this.audio.setMuted(true)
     this.ui.showResult(false, this.multiplayer.me?.score ?? 0, reason)
+  }
+
+  private forfeitCurrentQuestion() {
+    const me = this.multiplayer.me
+    if (!this.gameActive || !me || me.activeQuestion === null) return
+    const key = `${this.sessionId}:${me.activeQuestion}:${me.questionOpenedAt}`
+    this.ui.q<HTMLButtonElement>('#submit-stage').disabled = true
+    if (key === this.forfeitedQuestion) return
+    this.forfeitedQuestion = key
+    this.multiplayer.send({ type: 'forfeitQuestion', index: me.activeQuestion })
   }
 
   private updateAmbient() {
@@ -632,15 +651,17 @@ export class Experience {
   }
 
   private keydown(event: KeyboardEvent) {
+    if (this.ui.questionOpen) {
+      if (event.code === 'Escape') event.preventDefault()
+      return
+    }
     if (!this.started || event.target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.target.isContentEditable)) return
     if (event.code === 'Escape') {
       if (this.ui.panelOpen) this.closePanels()
-      else if (!this.ui.q('#question-panel').hidden) this.ui.q('#question-panel').hidden = true
       else if (this.guided) this.exitGuided()
     }
     if (event.code === 'KeyQ' && this.gameActive) {
-      if (this.multiplayer.me?.activeQuestion !== null) this.ui.q('#question-panel').hidden = false
-      else this.ui.root.querySelector<HTMLButtonElement>('#hunt-grid button:not(:disabled)')?.focus()
+      this.ui.root.querySelector<HTMLButtonElement>('#hunt-grid button:not(:disabled)')?.focus()
     }
     if (event.code === 'KeyM') this.audio.toggleMute()
     if (event.code === 'KeyE' && this.nearbyIndex >= 0 && !this.ui.panelOpen) {
