@@ -1,0 +1,42 @@
+[
+  [
+    {"question":"Nhóm yếu tố nào trực tiếp góp phần hình thành chí hướng cứu nước ở giai đoạn đầu?","choices":["Gia đình, quê hương và thực tế xã hội Việt Nam","Luận cương của Lênin, phong trào công nhân và Quốc tế Cộng sản","Cương lĩnh đầu tiên, Hội Thanh niên và các lớp huấn luyện"],"answer":0,"explanation":"Gia đình, quê hương và thực tế xã hội là những ảnh hưởng được trình bày trong giai đoạn trước 1911."},
+    {"question":"Thái độ của Nguyễn Tất Thành đối với con đường cứu nước của các bậc tiền bối được mô tả thế nào?","choices":["Chọn tiếp tục nguyên vẹn con đường của các bậc tiền bối","Khâm phục tinh thần nhưng muốn tìm một con đường khác","Đã xác định ngay con đường cách mạng vô sản"],"answer":1,"explanation":"Người khâm phục tinh thần yêu nước của tiền bối nhưng không hoàn toàn lựa chọn những con đường đã có."},
+    {"question":"Nhận định nào phù hợp nhất với kết quả tư tưởng ở giai đoạn trước 1911?","choices":["Đã hình thành đầy đủ đường lối tổ chức cách mạng Việt Nam","Đã hoàn thiện quan điểm về Nhà nước sau độc lập","Hình thành lòng yêu nước, thương dân và chí hướng cứu nước mới"],"answer":2,"explanation":"Giai đoạn đầu hình thành tình cảm yêu nước, thương dân và chí hướng tìm đường mới, chưa phải đường lối hoàn chỉnh."},
+    {"question":"Nguyễn Tất Thành bắt đầu hành trình tìm đường cứu nước vào năm nào?","choices":["1909","1910","1912"],"answer":3,"manualAnswer":"1911","explanation":"Người rời Bến Nhà Rồng ngày 5 tháng 6 năm 1911."},
+    {"question":"Mốc năm đầu tiên trên dòng thời gian bảo tàng là năm nào?","choices":["1889","1891","1892"],"answer":3,"manualAnswer":"1890","explanation":"Dòng thời gian trên sàn bảo tàng bắt đầu ở mốc 1890."},
+    {"question":"Đầu thế kỷ nào là bối cảnh Nguyễn Tất Thành hình thành chí hướng cứu nước mới? Nhập số thế kỷ.","choices":["18","19","21"],"answer":3,"manualAnswer":"20","explanation":"Nội dung chương đặt bối cảnh vào cuối thế kỷ XIX, đầu thế kỷ XX (20)."}
+  ],
+  [
+    {"question":"Trình tự nào đúng với hành trình nhận thức giai đoạn 1911–1920?","choices":["Luận cương → ra đi → Yêu sách","Ra đi → Yêu sách → tiếp cận Luận cương","Yêu sách → Luận cương → ra đi"],"answer":1,"explanation":"Các mốc theo thứ tự là 1911, 1919 và 1920."},
+    {"question":"Yêu sách của nhân dân An Nam được gửi tới hội nghị nào?","choices":["Hội nghị Versailles","Hội nghị Tours","Hội nghị thành lập Đảng"],"answer":0,"explanation":"Yêu sách năm 1919 được gửi tới Hội nghị Versailles."},
+    {"question":"Yếu tố nào gắn trực tiếp với bước ngoặt lựa chọn con đường cách mạng vô sản?","choices":["Tiếp cận Luận cương của V.I. Lênin về dân tộc và thuộc địa","Xuất bản Đường Kách mệnh và tổ chức các lớp huấn luyện","Chủ trì hợp nhất các tổ chức cộng sản"],"answer":0,"explanation":"Luận cương về vấn đề dân tộc và thuộc địa gắn với bước ngoặt năm 1920."},
+    {"question":"Yêu sách của nhân dân An Nam được gửi tới Versailles vào năm nào?","choices":["1917","1918","1921"],"answer":3,"manualAnswer":"1919","explanation":"Mốc Yêu sách là năm 1919."},
+    {"question":"Nguyễn Ái Quốc tiếp cận Luận cương của Lênin vào năm nào?","choices":["1919","1921","1922"],"answer":3,"manualAnswer":"1920","explanation":"Bước ngoặt nhận thức được triển lãm ghi ở năm 1920."},
+    {"question":"Giai đoạn khảo nghiệm thực tiễn trong chương 2 bắt đầu ở năm nào?","choices":["1908","1910","1912"],"answer":3,"manualAnswer":"1911","explanation":"Chương 2 bắt đầu bằng hành trình ra đi năm 1911."}
+  ],
+  [
+    {"question":"Tác phẩm nào tập hợp các bài giảng về lý luận và phương pháp cách mạng?","choices":["Bản án chế độ thực dân Pháp","Đường Kách mệnh","Cương lĩnh chính trị đầu tiên"],"answer":1,"explanation":"Đường Kách mệnh tập hợp các bài giảng của Nguyễn Ái Quốc."},
+    {"question":"Cặp tư liệu và ý nghĩa nào phù hợp nhất?","choices":["Bản án chế độ thực dân Pháp — văn kiện hợp nhất các tổ chức cộng sản","Đường Kách mệnh — bản yêu sách gửi Versailles","Cương lĩnh đầu tiên — xác lập đường lối cơ bản của cách mạng Việt Nam"],"answer":2,"explanation":"Cương lĩnh chính trị đầu tiên xác lập đường lối cơ bản của cách mạng Việt Nam."},
+    {"question":"Trọng tâm phát triển tư tưởng trong giai đoạn 1920–1930 là gì?","choices":["Từ con đường đã chọn đến mục tiêu, lực lượng, tổ chức và phương pháp cách mạng","Tìm kiếm lần đầu con đường cứu nước qua lao động ở nước ngoài","Hoàn thiện quan điểm Nhà nước qua thực tiễn sau độc lập"],"answer":0,"explanation":"Giai đoạn này hình thành những nội dung cơ bản về cách mạng Việt Nam."},
+    {"question":"Hội Việt Nam Cách mạng Thanh niên được thành lập vào năm nào?","choices":["1924","1926","1927"],"answer":3,"manualAnswer":"1925","explanation":"Transcript chương 3 ghi sự kiện thành lập Hội ở năm 1925."},
+    {"question":"Đường Kách mệnh được xuất bản vào năm nào?","choices":["1925","1926","1928"],"answer":3,"manualAnswer":"1927","explanation":"Tác phẩm Đường Kách mệnh được xuất bản năm 1927."},
+    {"question":"Cương lĩnh chính trị đầu tiên gắn với sự ra đời của Đảng vào năm nào?","choices":["1929","1931","1932"],"answer":3,"manualAnswer":"1930","explanation":"Đảng và Cương lĩnh chính trị đầu tiên gắn với mốc đầu năm 1930."}
+  ],
+  [
+    {"question":"Trước những thử thách 1930–1941, cách ứng xử nào được chương nhấn mạnh?","choices":["Thay đổi đường lối chỉ theo những nhận định chưa đầy đủ","Tiếp tục nghiên cứu, hoạt động và theo dõi sát thực tiễn","Chờ tới sau độc lập mới nghiên cứu tình hình Việt Nam"],"answer":1,"explanation":"Người tiếp tục nghiên cứu và theo dõi thực tiễn Việt Nam cũng như thế giới."},
+    {"question":"Pác Bó đánh dấu sự chuyển tiếp nào trong hành trình?","choices":["Từ hoạt động ở nước ngoài sang trực tiếp lãnh đạo cách mạng trong nước","Từ lựa chọn con đường cứu nước sang gửi Yêu sách","Từ xuất bản Đường Kách mệnh sang thành lập Hội Thanh niên"],"answer":0,"explanation":"Pác Bó gắn với việc trở về Tổ quốc năm 1941."},
+    {"question":"Nhiệm vụ nào ngày càng được khẳng định ở vị trí hàng đầu?","choices":["Hợp nhất các tổ chức cộng sản ở nước ngoài","Xây dựng chính quyền sau Tổng khởi nghĩa","Giải phóng dân tộc"],"answer":2,"explanation":"Thực tiễn khẳng định yêu cầu đặt nhiệm vụ giải phóng dân tộc lên hàng đầu."},
+    {"question":"Nguyễn Ái Quốc trở về Tổ quốc vào năm nào?","choices":["1939","1940","1942"],"answer":3,"manualAnswer":"1941","explanation":"Người trở về Tổ quốc đầu năm 1941."},
+    {"question":"Giai đoạn vượt qua thử thách của chương 4 bắt đầu ở năm nào?","choices":["1928","1929","1931"],"answer":3,"manualAnswer":"1930","explanation":"Giai đoạn chương 4 là đầu 1930 đến đầu 1941."},
+    {"question":"Từ mốc ra đi 1911 tới trở về 1941 là bao nhiêu năm? Nhập số năm.","choices":["28","29","31"],"answer":3,"manualAnswer":"30","explanation":"1941 trừ 1911 bằng 30 năm, phù hợp mô tả khoảng ba mươi năm hoạt động ở nước ngoài."}
+  ],
+  [
+    {"question":"Ngày đọc Tuyên ngôn Độc lập tại Ba Đình là ngày nào?","choices":["19.08.1945","02.09.1945","02.09.1946"],"answer":1,"explanation":"Chủ tịch Hồ Chí Minh đọc Tuyên ngôn Độc lập ngày 2 tháng 9 năm 1945."},
+    {"question":"Hội nghị Trung ương lần thứ tám gắn với quyết định nào được transcript nêu?","choices":["Thành lập Hội Việt Nam Cách mạng Thanh niên","Hợp nhất các tổ chức cộng sản","Thành lập Mặt trận Việt Minh"],"answer":2,"explanation":"Hội nghị tháng 5 năm 1941 quyết định thành lập Mặt trận Việt Minh."},
+    {"question":"Nhận định nào đúng về quá trình phát triển tư tưởng sau giành độc lập?","choices":["Tiếp tục bổ sung qua bảo vệ độc lập, kháng chiến, xây dựng và thống nhất đất nước","Đã hoàn tất, chỉ cần giữ nguyên các quan điểm trước 1930","Chủ yếu quay lại tìm kiếm con đường cứu nước ở nước ngoài"],"answer":0,"explanation":"Thực tiễn lãnh đạo cách mạng tiếp tục bổ sung và hoàn thiện tư tưởng."},
+    {"question":"Hội nghị Trung ương lần thứ tám diễn ra vào năm nào?","choices":["1940","1942","1943"],"answer":3,"manualAnswer":"1941","explanation":"Hội nghị diễn ra tháng 5 năm 1941."},
+    {"question":"Tổng khởi nghĩa tháng Tám giành chính quyền thành công vào năm nào?","choices":["1944","1946","1947"],"answer":3,"manualAnswer":"1945","explanation":"Cách mạng Tháng Tám thành công năm 1945."},
+    {"question":"Hồ Chí Minh qua đời, kết thúc giai đoạn cuối của hành trình, vào năm nào?","choices":["1967","1968","1970"],"answer":3,"manualAnswer":"1969","explanation":"Chương cuối kết thúc ở tháng 9 năm 1969."}
+  ]
+]

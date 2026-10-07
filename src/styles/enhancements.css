@@ -1,0 +1,11 @@
+#journal-button,#help-button{position:absolute;pointer-events:auto;background:rgba(20,16,12,.88);font-size:11px;letter-spacing:.08em;padding:12px 16px;border-radius:3px}
+#journal-button{left:24px;bottom:195px}#help-button{left:24px;bottom:145px}
+.audio-controls{background:rgba(20,16,12,.82);padding:6px;border-radius:4px}.audio-controls button{font-size:11px;letter-spacing:.06em}
+#chapter{padding:12px;background:rgba(20,16,12,.72);border-left:2px solid #c29a61}#help{padding:12px;background:rgba(20,16,12,.65);border-radius:3px;font-size:12px}
+#home-button{background:rgba(20,16,12,.88);color:#f0e9dd;font-size:11px}
+.panel{width:min(560px,100%)}.panel p{font-size:15px;line-height:1.85}.panel h3{font-size:17px;color:#d8b987}
+.panel.zoomed{width:min(1000px,100%)}.panel.zoomed .artifact-image{max-height:none;width:100%;border:0}
+.learning-card{padding:20px 0;border-bottom:1px solid #51412c}.quiz-choice{display:block;width:100%;text-align:left;letter-spacing:0;font-size:14px;margin:8px 0;padding:12px 14px}.quiz-feedback{color:#e3c58d}
+#lesson-gate{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);width:min(580px,calc(100vw - 40px));padding:20px 24px;background:rgba(20,16,12,.96);border:1px solid #c29a61;border-radius:6px;z-index:13;text-align:center;box-shadow:0 8px 40px #0005}#lesson-gate.guided-lesson{bottom:92px}#lesson-gate p{font-size:13px;line-height:1.6;margin:0 0 12px}#lesson-gate .eyebrow{color:#dbbd8c}#lesson-listen{background:#a48252;color:#17130f;font-size:13px}#lesson-listen:disabled{opacity:.6;cursor:wait}#guided-next:disabled{opacity:.35;cursor:not-allowed}#upcoming-artifacts{margin-top:16px}.upcoming-item{display:flex;align-items:center;gap:12px;text-align:left;padding:6px;font-size:12px}.upcoming-item img{width:42px;height:50px;object-fit:contain;background:#362c20}
+#tour-pause{font-size:10px;padding:9px 14px}#prompt{background:rgba(20,16,12,.8);padding:8px 14px;border-radius:20px}#prompt:empty{display:none}
+@media(max-width:767px){.audio-controls{top:125px;right:12px;max-width:calc(100vw - 24px);flex-wrap:wrap}.audio-controls button{font-size:10px}#journal-button{bottom:210px;left:16px}#help-button{bottom:165px;left:16px}#final-actions{bottom:110px;right:16px;flex-wrap:wrap}.guided-actions{flex-wrap:wrap}}
