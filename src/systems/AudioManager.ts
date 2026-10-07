@@ -45,6 +45,17 @@ export class AudioManager {
   get isMuted() { return this.muted }
   isVisited(path: string) { return this.visited.has(path) }
   hasCompleted(path: string) { return this.completed.has(path) }
+  get progress() {
+    return this.narration.path && this.narration.element ? { path: this.narration.path, seconds: this.narration.element.currentTime } : undefined
+  }
+  restoreNarration(path: string, seconds: number) {
+    const element = this.availability.get(path)
+    if (!element || !Number.isFinite(seconds) || seconds < 0 || this.hasCompleted(path)) return
+    this.stopNarration(); this.narration = { path, element }
+    element.currentTime = Math.min(seconds, Number.isFinite(element.duration) ? Math.max(0, element.duration - .1) : seconds)
+    element.volume = VOLUMES.narration; element.muted = this.muted
+    this.state = 'paused'; this.bindNarrationEvents(element); this.emit()
+  }
 
   selectNarration(path: string) {
     if (this.narration.path === path && this.narration.element) return

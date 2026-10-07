@@ -35,13 +35,17 @@ export class Experience {
   private tourPaused = false
   private lessonIndex = -1
   private multiplayer = new Multiplayer(room => this.updateRoom(room), () => {
-    if (this.gameActive) this.loseGame('Mất kết nối với phòng chơi.')
-    else { this.ui.setStartAllowed(false); this.ui.setLobbyMessage('Đã mất kết nối. Vào lại phòng trước khi bắt đầu.') }
+    this.saveAudioProgress()
+    this.gameActive = false; this.started = false; this.guided = false; this.controls.enabled = false
+    this.roomSignature = ''; this.lessonIndex = -1
+    this.audio.pauseNarration()
+    this.ui.suspendSession('Đang nối lại phiên. Điểm và tiến độ được giữ trong 5 phút; bạn có thể F5 để thử lại.')
   }, message => this.ui.setLobbyMessage(message))
   private visitors: Visitors
   private gameActive = false
   private eliminated = false
   private positionTimer = 0
+  private audioSaveTimer = 0
   private reportedLessons = new Set<number>()
   private roomSignature = ''
   private sessionId = ''
@@ -70,11 +74,16 @@ export class Experience {
       newSession: () => this.multiplayer.send({ type: 'reset' }),
       downloadResults: () => this.multiplayer.downloadResults(),
       openQuestion: index => {
-        if (!this.gameActive || !this.audio.hasCompleted(audioAssets.narration[Math.floor(index / 6) + 1]) || document.hidden) return
+        if (!this.gameActive || !this.multiplayer.me?.listened.includes(Math.floor(index / 6) + 1) || document.hidden) return
         this.multiplayer.send({ type: 'position', x: this.camera.position.x, z: this.camera.position.z, yaw: this.camera.rotation.y })
         this.multiplayer.send({ type: 'openQuestion', index })
       },
       host: () => this.multiplayer.joinHost(),
+      resume: async () => {
+        this.ui.setLobbyMessage('Đang tìm lại phiên chơi đã lưu...')
+        const restored = await this.multiplayer.resume()
+        if (!restored) this.ui.setLobbyMessage('')
+      },
       home: () => this.home(),
       close: () => this.closePanels(),
       mute: () => this.audio.toggleMute(),
@@ -124,7 +133,7 @@ export class Experience {
     window.addEventListener('blur', () => this.forfeitCurrentQuestion())
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.forfeitCurrentQuestion() })
     document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) this.forfeitCurrentQuestion() })
-    window.addEventListener('beforeunload', () => this.forfeitCurrentQuestion())
+    window.addEventListener('beforeunload', () => { this.saveAudioProgress(); this.forfeitCurrentQuestion() })
     window.addEventListener('popstate', () => this.forfeitCurrentQuestion())
     void this.load(); this.renderer.setAnimationLoop(() => this.update())
   }
@@ -146,12 +155,16 @@ export class Experience {
     this.sightseeing = false; this.ui.setVisitMode(false)
     this.gameActive = true; this.museum.quizMarkers.visible = true; this.audio.setMuted(false)
     const spawn = this.multiplayer.me?.position
-    if (spawn) this.camera.position.set(spawn.x, config.player.eyeHeight, spawn.z)
+    if (spawn) { this.camera.position.set(spawn.x, config.player.eyeHeight, spawn.z); this.controls.setOrientation(spawn.yaw, 0) }
     this.visitMode = mode
     this.started = true; this.guided = mode === 'guided'; this.controls.enabled = !this.guided; this.ui.explore(); this.ui.setHomeControl(!this.guided)
     void this.audio.playAmbient(audioAssets.ambient.corridor)
     if (this.guided) { this.guidedSteps = this.createGuidedSteps(); this.ui.setGuidedTour(true); this.advanceGuidedStep() }
-    else this.updateNarrationZone()
+    else {
+      this.updateNarrationZone()
+      const saved = this.multiplayer.savedAudio
+      if (saved && audioAssets.narration.includes(saved.path) && !this.multiplayer.me?.listened.includes(audioAssets.narration.indexOf(saved.path))) this.audio.restoreNarration(saved.path, saved.seconds)
+    }
   }
 
   private startVisitor(mode: 'free' | 'guided') {
@@ -181,9 +194,15 @@ export class Experience {
     this.visitors.animate(delta, this.camera.position)
     this.renderer.render(this.scene, this.camera)
     if (this.gameActive) {
+      this.audioSaveTimer += delta
+      if (this.audioSaveTimer >= 1) { this.audioSaveTimer = 0; this.saveAudioProgress() }
       this.positionTimer += delta
       if (this.positionTimer >= .2) { this.positionTimer = 0; this.multiplayer.send({ type: 'position', x: this.camera.position.x, z: this.camera.position.z, yaw: this.camera.rotation.y }) }
     }
+  }
+  private saveAudioProgress() {
+    const progress = this.audio.progress
+    if (progress) this.multiplayer.saveAudio(progress.path, progress.seconds)
   }
 
   private getSafeCorridorX(z: number): number {
@@ -552,7 +571,7 @@ export class Experience {
 
   private refreshLesson() {
     if (this.lessonIndex < 0) return
-    const path = audioAssets.narration[this.lessonIndex], listened = this.audio.hasCompleted(path)
+    const path = audioAssets.narration[this.lessonIndex], listened = this.gameActive ? this.multiplayer.me?.listened.includes(this.lessonIndex) ?? false : this.audio.hasCompleted(path)
     if (this.controls) this.controls.movementLocked = false
     const chapter = chapters[this.lessonIndex - 1]
     const title = this.lessonIndex === 0 ? 'Mở đầu hành trình' : chapter ? chapter.period : 'Kết luận'
@@ -592,7 +611,16 @@ export class Experience {
     }
     if (!me) return
     if (room.phase === 'playing' && me.status === 'playing' && !this.gameActive && !this.started) this.beginGame('free')
-    if (me.status === 'lost') { this.loseGame(me.reason ?? 'Lượt chơi đã kết thúc.'); return }
+    if (me.status === 'reconnecting') {
+      this.saveAudioProgress(); this.gameActive = false; this.started = false; this.guided = false
+      this.roomSignature = ''; this.lessonIndex = -1; this.controls.enabled = false; this.audio.pauseNarration()
+      this.ui.suspendSession('Đang nối lại phiên. Điểm và tiến độ được giữ trong 5 phút.'); return
+    }
+    if (me.status === 'lost') {
+      if (this.gameActive) this.loseGame(me.reason ?? 'Lượt chơi đã kết thúc.')
+      else this.ui.setLobbyMessage(me.reason ?? 'Không thể nối lại. Chờ quản trò mở phiên mới.')
+      return
+    }
     const signature = `${me.activeQuestion}:${me.answers.length}:${me.listened.join(',')}`
     if (signature !== this.roomSignature) { this.roomSignature = signature; this.refreshLesson(); this.ui.showCompetitionQuestions(me, this.nearbyQuestionStage()) }
     if (me.activeQuestion !== null && (document.hidden || !document.hasFocus())) this.forfeitCurrentQuestion()

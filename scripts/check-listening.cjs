@@ -18,6 +18,7 @@ const snapshot = { path: data.audioAssets.narration[0], state: 'playing' }
 const experience = Object.create(Experience.prototype)
 Object.assign(experience, {
   camera: { position: { x: 0, y: 1.68, z: 8 } }, controls: { movementLocked: true }, lessonIndex: -1, guided: false, gameActive: true,
+  multiplayer: { me: { listened: [] } },
   audio: { snapshot, hasCompleted: path => finished.has(path), selectNarration: path => selected = path, stopNarration() { stopped++ }, fadeOutNarration: () => Promise.resolve() },
   ui: { q: () => button, setNarrationControl() {}, showLesson() {}, hideLesson() {}, setTourNextEnabled() {}, markListened() {}, setLessonInstruction() {} }
 })

@@ -9,7 +9,7 @@ import { rankPlayers, playerRank, stageSeconds } from '../systems/GameRoom'
 import { quizStations } from '../data/quizStations'
 
 type AppState = 'LOADING' | 'START_SCREEN' | 'EXPLORING' | 'ARTIFACT_OPEN' | 'CREDITS'
-type UIHandlers = { visit: (mode: 'free' | 'guided') => void; start: () => void; end: () => void; newSession: () => void; downloadResults: () => void; openQuestion: (index: number) => void; host: () => Promise<void>; home: () => void; close: () => void; mute: () => boolean; narration: () => void; listenHere: () => void; transcript: () => void; credits: () => void; restart: () => void; nextTourStep: () => void; exitGuided: () => void; pauseTour: () => void; join: (name: string, avatar: number) => Promise<void>; submitAnswer: (stage: number, index: number, choice: number, text: string) => void }
+type UIHandlers = { visit: (mode: 'free' | 'guided') => void; start: () => void; end: () => void; newSession: () => void; downloadResults: () => void; openQuestion: (index: number) => void; host: () => Promise<void>; resume: () => Promise<void>; home: () => void; close: () => void; mute: () => boolean; narration: () => void; listenHere: () => void; transcript: () => void; credits: () => void; restart: () => void; nextTourStep: () => void; exitGuided: () => void; pauseTour: () => void; join: (name: string, avatar: number) => Promise<void>; submitAnswer: (stage: number, index: number, choice: number, text: string) => void }
 
 export class UI {
   readonly root: HTMLElement
@@ -87,7 +87,7 @@ export class UI {
         else if (!event.shiftKey && (document.activeElement === last || !this.q('#question-panel').contains(document.activeElement))) { event.preventDefault(); first?.focus() }
       }
     })
-    this.q('#start .instructions').insertAdjacentHTML('beforebegin', `<div class="experience-tabs" role="group" aria-label="Chọn trải nghiệm"><button id="visit-tab" aria-pressed="true">THAM QUAN TÌM HIỂU</button><button id="competitive-tab" aria-pressed="false">CHƠI TÍNH ĐIỂM</button></div><div id="visitor-entry"><div class="visit-modes"><button id="visit-free-button">TỰ THAM QUAN</button><button id="visit-guided-button">ĐI CÙNG HƯỚNG DẪN VIÊN</button></div></div><div id="competition-entry" hidden><div class="lobby"><p class="eyebrow">PHÒNG HCM202</p><label>Tên người chơi<input id="player-name" maxlength="24" autocomplete="off" placeholder="Tên của bạn"></label><div class="avatar-options">${visitorNames.map((name, index) => `<button class="avatar-choice" data-avatar="${index}" aria-pressed="${index === 0}"><span class="avatar-figure" style="--outfit:${visitorColors[index]}"></span>${name}</button>`).join('')}</div><button id="join-room">VÀO PHÒNG CHƠI</button><p id="room-message" aria-live="polite"></p><div id="lobby-roster"></div><p class="lobby-rules">Tự do chọn khu khám phá. Phải nghe hết nội dung khu đó mới được trả lời câu hỏi tại biển vàng ?.<br>Trả lời lần lượt câu 1 đến 6 trong từng khu; mỗi câu chỉ một lượt, đúng +100 điểm. Giới hạn: 20 / 15 / 10 / 5 / 5 giây.<br>Khi mở câu, phải trả lời hoặc chờ hết giờ; không thể đóng. Chuyển tab / rời cửa sổ / thoát toàn màn hình tính câu đang mở là sai. Không sao chép hay bôi đen câu hỏi / đáp án.<br>Quản trò kết thúc phiên. Bằng điểm: tổng thời gian trả lời đúng (ms) thấp hơn xếp trên; bằng cả hai thì đồng hạng.</p></div></div><div id="host-entry" hidden><p class="eyebrow">CHỦ PHÒNG · HCM202</p><p id="host-status" aria-live="polite">Đang kết nối phòng...</p><div id="host-roster"></div><p class="host-guide">Chờ người chơi vào /play rồi bấm BẮT ĐẦU. Giữ tab này mở trong suốt phiên. Bấm KẾT THÚC PHIÊN để chốt điểm và top 5; câu đang mở chưa gửi sẽ không được tính.</p><div class="host-actions"><button id="start-button" disabled>BẮT ĐẦU</button><button id="end-session" hidden>KẾT THÚC PHIÊN</button><button id="new-session" hidden>MỞ PHIÊN MỚI</button><button id="download-results">TẢI KẾT QUẢ GẦN NHẤT</button></div><div id="host-ranking"></div></div>`)
+    this.q('#start .instructions').insertAdjacentHTML('beforebegin', `<div class="experience-tabs" role="group" aria-label="Chọn trải nghiệm"><button id="visit-tab" aria-pressed="true">THAM QUAN TÌM HIỂU</button><button id="competitive-tab" aria-pressed="false">CHƠI TÍNH ĐIỂM</button></div><div id="visitor-entry"><div class="visit-modes"><button id="visit-free-button">TỰ THAM QUAN</button><button id="visit-guided-button">ĐI CÙNG HƯỚNG DẪN VIÊN</button></div></div><div id="competition-entry" hidden><div class="lobby"><p class="eyebrow">PHÒNG HCM202</p><label>Tên người chơi<input id="player-name" maxlength="24" autocomplete="off" placeholder="Tên của bạn"></label><div class="avatar-options">${visitorNames.map((name, index) => `<button class="avatar-choice" data-avatar="${index}" aria-pressed="${index === 0}"><span class="avatar-figure" style="--outfit:${visitorColors[index]}"></span>${name}</button>`).join('')}</div><button id="join-room">VÀO PHÒNG CHƠI</button><p id="room-message" aria-live="polite"></p><div id="lobby-roster"></div><p class="lobby-rules">Tự do chọn khu khám phá. Phải nghe hết nội dung khu đó mới được trả lời câu hỏi tại biển vàng ?.<br>Trả lời lần lượt câu 1 đến 6 trong từng khu; mỗi câu chỉ một lượt, đúng +100 điểm. Giới hạn: 20 / 15 / 10 / 5 / 5 giây.<br>Khi mở câu, phải trả lời hoặc chờ hết giờ; không thể đóng. Chuyển tab / rời cửa sổ / thoát toàn màn hình tính câu đang mở là sai. Không sao chép hay bôi đen câu hỏi / đáp án.<br>F5 tự nối lại bằng token trên trình duyệt; mất kết nối được giữ chỗ 5 phút. F5 khi mở câu vẫn tính câu đó sai. Token chỉ xoá khi quản trò kết thúc phiên.<br>Quản trò kết thúc phiên. Bằng điểm: tổng thời gian trả lời đúng (ms) thấp hơn xếp trên; bằng cả hai thì đồng hạng.</p></div></div><div id="host-entry" hidden><p class="eyebrow">CHỦ PHÒNG · HCM202</p><p id="host-status" aria-live="polite">Đang kết nối phòng...</p><div id="host-roster"></div><p class="host-guide">Chờ người chơi vào /play rồi bấm BẮT ĐẦU. Giữ tab này mở trong suốt phiên. Bấm KẾT THÚC PHIÊN để chốt điểm và top 5; câu đang mở chưa gửi sẽ không được tính.</p><div class="host-actions"><button id="start-button" disabled>BẮT ĐẦU</button><button id="end-session" hidden>KẾT THÚC PHIÊN</button><button id="new-session" hidden>MỞ PHIÊN MỚI</button><button id="download-results">TẢI KẾT QUẢ GẦN NHẤT</button></div><div id="host-ranking"></div></div>`)
     const applyRoute = () => {
       const host = location.pathname === '/start', competitive = location.pathname === '/play'
       this.root.classList.toggle('host-screen', host)
@@ -161,7 +161,7 @@ export class UI {
 
   q<T extends HTMLElement = HTMLElement>(selector: string) { const element = this.root.querySelector<T>(selector); if (!element) throw new Error(`Required UI element ${selector} was not found`); return element }
   progress(value: number) { this.q('.load-track i').style.width = `${value * 100}%` }
-  ready() { this.state = 'START_SCREEN'; this.q('#loading').classList.add('hidden'); this.q('#start').classList.remove('hidden'); this.q('#visit-tab').focus(); if (location.pathname === '/start') void this.handlers.host().catch(error => this.setLobbyMessage(error instanceof Error ? error.message : 'Không kết nối được Supabase.')) }
+  ready() { this.state = 'START_SCREEN'; this.q('#loading').classList.add('hidden'); this.q('#start').classList.remove('hidden'); this.q('#visit-tab').focus(); if (location.pathname === '/start') void this.handlers.host().catch(error => this.setLobbyMessage(error instanceof Error ? error.message : 'Không kết nối được Supabase.')); else if (location.pathname === '/play') void this.handlers.resume().catch(error => this.setLobbyMessage(error instanceof Error ? error.message : 'Không khôi phục được phiên.')) }
   explore() { this.state = 'EXPLORING'; this.q('#start').classList.add('hidden'); this.q('#hud').classList.remove('hidden'); this.root.classList.toggle('competition-active', !this.sightseeing); if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); this.q('#help').classList.remove('faded') }
   setHomeControl(show: boolean) { this.q('#home-button').classList.toggle('hidden', !show) }
   showHome() { this.state = 'START_SCREEN'; this.q('#hud').classList.add('hidden'); this.q('#start').classList.remove('hidden'); this.q('#visit-tab').focus() }
@@ -217,7 +217,7 @@ export class UI {
   setLobbyMessage(message: string) { this.q(location.pathname === '/start' ? '#host-status' : '#room-message').textContent = message }
   updateLobby(room: Room, myId: string) {
     const host = room.hostId === myId, me = room.players.find(player => player.id === myId)
-    this.setStartAllowed(host && room.phase === 'waiting' && room.players.length > 0)
+    this.setStartAllowed(host && room.phase === 'waiting' && room.players.some(player => player.connected))
     this.q('#start-button').hidden = room.phase !== 'waiting'
     this.q('#end-session').hidden = !host || room.phase !== 'playing'
     this.q('#new-session').hidden = !host || room.phase !== 'ended'
@@ -231,7 +231,7 @@ export class UI {
       if (room.phase === 'waiting') this.setLobbyMessage('Đã vào phòng HCM202 — chờ quản trò bắt đầu.')
     }
     const roster = this.q(host ? '#host-roster' : '#lobby-roster'); roster.replaceChildren()
-    for (const player of room.players) { const row = document.createElement('p'); row.textContent = player.name; roster.append(row) }
+    for (const player of room.players) { const row = document.createElement('p'); row.textContent = `${player.name}${player.connected ? '' : ' · Đang chờ nối lại (5 phút)'}`; roster.append(row) }
   }
   private renderRanking(container: HTMLElement, room: Room, myId: string) {
     container.replaceChildren()
@@ -256,7 +256,7 @@ export class UI {
     const me = room.players.find(player => player.id === myId)
     this.q('#my-score').textContent = me ? `${me.name}: ${me.score} điểm · ${me.answeredCount}/30 câu · ${me.correctTimeMs} ms` : ''
     const list = this.q('#score-players'); list.replaceChildren()
-    const status = { waiting: 'Chờ', playing: 'Đang chơi', lost: 'Mất kết nối / rời phiên', finished: 'Đã kết thúc' }
+    const status = { waiting: 'Chờ', playing: 'Đang chơi', reconnecting: 'Chờ nối lại (5 phút)', lost: 'Hết hạn / rời phiên', finished: 'Đã kết thúc' }
     for (const player of rankPlayers(room.players).slice(0, 5)) {
       const row = document.createElement('div'); row.className = `score-row${player.id === myId ? ' me' : ''}`
       const dot = document.createElement('span'); dot.style.background = visitorColors[player.avatar]
@@ -348,6 +348,12 @@ export class UI {
     this.quizKey = ''; this.huntKey = ''; this.roomKey = ''
     this.q('#result-screen').classList.add('hidden'); this.q('#question-panel').hidden = true; this.q('#question-blocker').hidden = true; this.q('#question-hunt').hidden = true
     this.showHome()
+  }
+  suspendSession(message: string) {
+    this.quizKey = ''; this.huntKey = ''; this.roomKey = ''
+    this.closePanels(); this.hideLesson(); this.setGuidedTour(false)
+    this.q('#question-panel').hidden = true; this.q('#question-blocker').hidden = true; this.q('#question-hunt').hidden = true
+    this.showHome(); this.setLobbyMessage(message)
   }
   markListened(listened: boolean) {
     this.q('#lesson-listen').hidden = listened

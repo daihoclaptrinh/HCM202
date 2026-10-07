@@ -1,6 +1,7 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import { GameRoom, rankPlayers, playerRank, waitingPlayer, type Member, type Player, type Room } from './GameRoom'
 import { getSupabase } from './Supabase'
+import { clearPlayerSession, readPlayerSession, savePlayerSession, type PlayerSession } from './PlayerSession'
 export type { AnswerResult, Player, Room } from './GameRoom'
 
 export class Multiplayer {
@@ -16,37 +17,61 @@ export class Multiplayer {
   private self?: Player
   private positionSignature = ''
   private generation = 0
+  private connectionId = ''
+  private playerSession?: PlayerSession
+  private retryTimer?: number
+  private member?: Member
   constructor(private changed: (room: Room) => void, private disconnected: () => void, private error: (message: string) => void) {}
   get serverNow() { return Date.now() + this.timeOffset }
   get isHost() { return this.room?.hostId === this.id }
   get me() { return this.room?.players.find(player => player.id === this.id) }
   get connected() { return this.subscribed }
   joinHost() { return this.connect('Chủ phòng', 0, true) }
-  join(name: string, avatar: number) { return this.connect(name.trim(), avatar, false) }
-  private async connect(name: string, avatar: number, host: boolean) {
+  join(name: string, avatar: number) { const saved = readPlayerSession(); return this.connect(saved?.name ?? name.trim(), saved?.avatar ?? avatar, false, saved) }
+  async resume() {
+    const saved = readPlayerSession()
+    if (!saved) return false
+    await this.connect(saved.name, saved.avatar, false, saved)
+    return true
+  }
+  get savedAudio() { return this.playerSession?.audio }
+  saveAudio(path: string | undefined, seconds: number) {
+    if (!this.playerSession || this.room?.phase !== 'playing' || !path || !Number.isFinite(seconds)) return
+    this.playerSession.audio = { path, seconds }; savePlayerSession(this.playerSession)
+  }
+  private async connect(name: string, avatar: number, host: boolean, saved?: PlayerSession) {
     if (!name) throw new Error('Nhập tên người chơi.')
     this.leave()
     const generation = this.generation
     const client = await getSupabase(); this.client = client
     if (generation !== this.generation) throw new Error('Đã hủy vào phòng.')
-    this.id = crypto.randomUUID()
-    const member: Member = { id: this.id, name: name.slice(0, 24), avatar, host, joinedAt: Date.now() }
-    const channel = client.channel(`${import.meta.env.VITE_SUPABASE_REALTIME_TOPIC || 'hcm202'}-listened-v3`, { config: { presence: { key: this.id }, broadcast: { ack: true, self: false } } })
+    this.id = host ? crypto.randomUUID() : saved?.token ?? crypto.randomUUID()
+    this.connectionId = crypto.randomUUID()
+    this.playerSession = host ? undefined : saved ?? { token: this.id, name: name.slice(0, 24), avatar, sessionId: '' }
+    if (this.playerSession) savePlayerSession(this.playerSession)
+    const member: Member = { id: this.id, name: name.slice(0, 24), avatar, host, joinedAt: Date.now(), connectionId: this.connectionId, sessionId: saved?.sessionId ?? '' }
+    this.member = member
+    const channel = client.channel(`${import.meta.env.VITE_SUPABASE_REALTIME_TOPIC || 'hcm202'}-resume-v4`, { config: { presence: { key: this.connectionId }, broadcast: { ack: true, self: false } } })
     this.channel = channel
     channel.on('presence', { event: 'sync' }, () => this.syncPresence())
       .on('broadcast', { event: 'state' }, ({ payload }) => this.receiveState(payload))
+      .on('broadcast', { event: 'requestState' }, ({ payload }) => {
+        if (!this.isHost || !this.members.some(member => member.id === payload.id && member.connectionId === payload.connectionId)) return
+        this.publish(); this.publishPlayer(payload.id)
+      })
       .on('broadcast', { event: 'player' }, ({ payload }) => {
         if (payload.sessionId !== this.room?.sessionId || payload.hostId !== this.room?.hostId || payload.player?.id !== this.id || payload.version < (this.room?.version ?? 0)) return
         this.self = payload.player
         if (this.room) { this.room.players = this.room.players.map(player => player.id === this.id ? this.self! : player); this.changed(this.room) }
       })
       .on('broadcast', { event: 'command' }, ({ payload }) => {
-        if (!this.isHost || !this.model || payload.sessionId !== this.room?.sessionId || !this.members.some(member => member.id === payload.id && !member.host)) return
+        if (!this.isHost || !this.model || payload.sessionId !== this.room?.sessionId || !this.model.isCurrentConnection(payload.id, payload.connectionId)) return
         if (this.model.command(payload.id, payload.message)) { this.publish(); this.publishPlayer(payload.id) }
       })
       .on('broadcast', { event: 'position' }, ({ payload }) => {
         const player = this.room?.players.find(player => player.id === payload.id)
         const { x, z, yaw } = payload
+        if (this.model && !this.model.isCurrentConnection(payload.id, payload.connectionId)) return
         if (payload.sessionId !== this.room?.sessionId || !player || player.status !== 'playing' || ![x, z, yaw].every(Number.isFinite) || Math.abs(x) > 8 || z < -85 || z > 13) return
         player.position = { x, z, yaw }
         const stored = this.model?.room.players.find(player => player.id === payload.id)
@@ -59,6 +84,8 @@ export class Multiplayer {
       channel.subscribe(async status => {
         if (this.channel !== channel) return
         if (status === 'SUBSCRIBED') {
+          if (this.retryTimer) window.clearTimeout(this.retryTimer)
+          this.retryTimer = undefined
           this.subscribed = true
           const result = await channel.track(member)
           if (this.channel !== channel) return
@@ -76,7 +103,7 @@ export class Multiplayer {
           resolve()
         } else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) {
           window.clearTimeout(timeout); this.subscribed = false
-          if (joined) this.disconnected()
+          if (joined) { this.disconnected(); if (this.playerSession) this.scheduleResume() }
           else { this.leave(); reject(new Error('Supabase Realtime không kết nối được. Kiểm tra cấu hình và quyền public channel.')) }
         }
       })
@@ -98,6 +125,7 @@ export class Multiplayer {
         this.room = { code: 'HCM202', sessionId: this.room?.sessionId ?? '', hostId, phase: 'waiting', startedAt: 0, endedAt: 0, serverTime: Date.now(), version: 0, players: this.members.filter(member => !member.host).map(waitingPlayer) }
         this.changed(this.room)
       }
+      if (hostId) void this.broadcast('requestState', { id: this.id, connectionId: this.connectionId })
     }
   }
   private receiveState(room: Room) {
@@ -106,7 +134,19 @@ export class Multiplayer {
     this.timeOffset = room.serverTime - Date.now()
     if (room.sessionId !== this.room?.sessionId) this.self = undefined
     room.players = room.players.map(player => ({ ...player, answers: player.id === this.id ? this.self?.answers ?? [] : [] }))
-    this.room = room; this.changed(room)
+    this.room = room
+    if (!this.playerSession && this.member && !this.member.host && room.phase === 'waiting' && room.players.some(player => player.id === this.id)) {
+      this.playerSession = { token: this.id, name: this.member.name, avatar: this.member.avatar, sessionId: room.sessionId }
+    }
+    if (this.playerSession && room.players.some(player => player.id === this.id)) {
+      if (room.phase === 'ended') { clearPlayerSession(this.id); this.playerSession = undefined }
+      else {
+        if (this.playerSession.sessionId && this.playerSession.sessionId !== room.sessionId) this.playerSession.audio = undefined
+        this.playerSession.sessionId = room.sessionId; savePlayerSession(this.playerSession)
+        if (this.member && this.member.sessionId !== room.sessionId) { this.member.sessionId = room.sessionId; void this.channel?.track(this.member) }
+      }
+    } else if (this.playerSession && room.phase === 'ended' && this.playerSession.sessionId === room.sessionId) { clearPlayerSession(this.id); this.playerSession = undefined }
+    this.changed(room)
     if (room.phase === 'playing' && !this.isHost && !room.players.some(player => player.id === this.id)) this.error('Phòng đã bắt đầu trước khi bạn vào. Chờ chủ phòng mở lượt mới.')
   }
   private publish() {
@@ -126,7 +166,9 @@ export class Multiplayer {
     this.generation++
     const channel = this.channel; this.channel = undefined; this.subscribed = false
     if (this.timer) window.clearInterval(this.timer)
-    this.timer = undefined; this.model = undefined; this.self = undefined; this.members = []; this.room = undefined; this.id = ''; this.positionSignature = ''
+    if (this.retryTimer) window.clearTimeout(this.retryTimer)
+    this.retryTimer = undefined
+    this.timer = undefined; this.model = undefined; this.self = undefined; this.members = []; this.room = undefined; this.id = ''; this.positionSignature = ''; this.member = undefined; this.playerSession = undefined
     if (channel) void this.client?.removeChannel(channel)
   }
   send(message: Record<string, unknown>) {
@@ -135,7 +177,7 @@ export class Multiplayer {
       const signature = `${Number(message.x).toFixed(2)}:${Number(message.z).toFixed(2)}:${Number(message.yaw).toFixed(2)}`
       if (signature === this.positionSignature) return
       this.positionSignature = signature
-      void this.broadcast('position', { ...message, id: this.id, sessionId: this.room?.sessionId }); return
+      void this.broadcast('position', { ...message, id: this.id, connectionId: this.connectionId, sessionId: this.room?.sessionId }); return
     }
     if (this.isHost && this.model) {
       if (this.model.command(this.id, message)) {
@@ -144,7 +186,14 @@ export class Multiplayer {
         this.publish()
         this.model.room.players.forEach(player => this.publishPlayer(player.id))
       }
-    } else void this.broadcast('command', { id: this.id, sessionId: this.room?.sessionId, message })
+    } else void this.broadcast('command', { id: this.id, connectionId: this.connectionId, sessionId: this.room?.sessionId, message })
+  }
+  private scheduleResume() {
+    if (this.retryTimer || !readPlayerSession()) return
+    this.retryTimer = window.setTimeout(() => {
+      this.retryTimer = undefined
+      void this.resume().catch(() => this.scheduleResume())
+    }, 2000)
   }
   private resultRecord() {
     if (!this.model || this.model.room.phase !== 'ended') return undefined

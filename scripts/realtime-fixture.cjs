@@ -24,10 +24,14 @@ module.exports = async function realtimeFixture(context, members = new Map()) {
     if (message.type === 'track') members.set(page, message.member)
     if (message.type === 'leave') members.delete(page)
     const alive = [...members.keys()].filter(page => !page.isClosed())
-    if (message.type === 'send') await Promise.all(alive.filter(target => target !== page).map(target => target.evaluate(packet => window.fixtureBroadcast(packet), message.packet)))
+    const deliver = async (target, callback, payload) => {
+      try { await target.evaluate(callback, payload) }
+      catch (error) { if (!target.isClosed() && !/Execution context was destroyed|Cannot find context/.test(error.message)) throw error }
+    }
+    if (message.type === 'send') await Promise.all(alive.filter(target => target !== page).map(target => deliver(target, packet => window.fixtureBroadcast(packet), message.packet)))
     else {
-      const state = Object.fromEntries([...members.values()].map(member => [member.id, [member]]))
-      await Promise.all(alive.map(target => target.evaluate(state => window.fixturePresence(state), state)))
+      const state = Object.fromEntries([...members.values()].map(member => [member.connectionId ?? member.id, [member]]))
+      await Promise.all(alive.map(target => deliver(target, state => window.fixturePresence(state), state)))
     }
   })
   await context.route('**/src/systems/Supabase.ts*', route => route.fulfill({ contentType: 'text/javascript', body: 'export function getSupabase() { return window.fixtureSupabase }' }))

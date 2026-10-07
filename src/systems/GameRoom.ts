@@ -2,10 +2,11 @@ import quizBank from '../data/quizBank.json'
 import { quizStations, stationRadius } from '../data/quizStations'
 
 export type AnswerResult = { index: number; choice: number; text?: string; correct: boolean; timedOut: boolean; abandoned: boolean; explanation: string; openedAt: number; answeredAt: number; elapsedMs: number }
-export type Member = { id: string; name: string; avatar: number; host: boolean; joinedAt: number }
-export type Player = { id: string; name: string; avatar: number; activeQuestion: number | null; questionOpenedAt: number; questionDeadline: number; status: 'waiting' | 'playing' | 'lost' | 'finished'; score: number; correctTimeMs: number; answeredCount: number; answers: AnswerResult[]; listened: number[]; reason?: string; position: { x: number; z: number; yaw: number } }
+export type Member = { id: string; name: string; avatar: number; host: boolean; joinedAt: number; connectionId?: string; sessionId?: string }
+export type Player = { id: string; name: string; avatar: number; activeQuestion: number | null; questionOpenedAt: number; questionDeadline: number; status: 'waiting' | 'playing' | 'reconnecting' | 'lost' | 'finished'; connected: boolean; reconnectUntil: number; score: number; correctTimeMs: number; answeredCount: number; answers: AnswerResult[]; listened: number[]; reason?: string; position: { x: number; z: number; yaw: number } }
 export type Room = { code: 'HCM202'; sessionId: string; hostId: string; phase: 'waiting' | 'playing' | 'ended'; startedAt: number; endedAt: number; serverTime: number; version: number; players: Player[] }
 export const stageSeconds = [20, 15, 10, 5, 5]
+export const reconnectGraceMs = 5 * 60 * 1000
 export function rankPlayers(players: Player[]) {
   return [...players].sort((a, b) => b.score - a.score || a.correctTimeMs - b.correctTimeMs || a.id.localeCompare(b.id))
 }
@@ -13,32 +14,47 @@ export function playerRank(players: Player[], player: Player) {
   return 1 + players.filter(other => other.score > player.score || other.score === player.score && other.correctTimeMs < player.correctTimeMs).length
 }
 export function waitingPlayer(member: Member): Player {
-  return { id: member.id, name: member.name, avatar: member.avatar, activeQuestion: null, questionOpenedAt: 0, questionDeadline: 0, status: 'waiting', score: 0, correctTimeMs: 0, answeredCount: 0, answers: [], listened: [], position: { x: 0, z: 8, yaw: 0 } }
+  return { id: member.id, name: member.name, avatar: member.avatar, activeQuestion: null, questionOpenedAt: 0, questionDeadline: 0, status: 'waiting', connected: true, reconnectUntil: 0, score: 0, correctTimeMs: 0, answeredCount: 0, answers: [], listened: [], position: { x: 0, z: 8, yaw: 0 } }
 }
 
 // The host clock records every attempt; clients cannot submit scores or durations.
 export class GameRoom {
   room: Room
+  private connections = new Map<string, string>()
   constructor(hostId: string, private now = () => Math.round(performance.timeOrigin + performance.now())) {
     this.room = { code: 'HCM202', sessionId: hostId + '-' + now(), hostId, phase: 'waiting', startedAt: 0, endedAt: 0, serverTime: now(), version: 0, players: [] }
   }
   sync(members: Member[]) {
     let changed = false
-    const connected = new Set(members.filter(member => !member.host).map(member => member.id))
+    const latest = new Map<string, Member>()
+    for (const member of members.filter(member => !member.host).sort((a, b) => a.joinedAt - b.joinedAt)) latest.set(member.id, member)
     if (this.room.phase === 'waiting') {
-      for (const member of members) {
-        if (member.host || this.room.players.some(player => player.id === member.id)) continue
-        this.room.players.push(waitingPlayer(member)); changed = true
+      for (const member of latest.values()) {
+        if (!this.room.players.some(player => player.id === member.id)) { this.room.players.push(waitingPlayer(member)); changed = true }
       }
-      const count = this.room.players.length
-      this.room.players = this.room.players.filter(player => connected.has(player.id)); changed ||= count !== this.room.players.length
-    } else if (this.room.phase === 'playing') {
-      for (const player of this.room.players) if (!connected.has(player.id) && player.status === 'playing') { this.lose(player, 'Mất kết nối với phòng chơi.'); changed = true }
+    }
+    if (this.room.phase !== 'ended') for (const player of this.room.players) {
+      const member = latest.get(player.id)
+      const connection = member?.connectionId ?? member?.id
+      const eligible = !!member && (this.room.phase === 'waiting' || member.sessionId === this.room.sessionId || this.connections.get(player.id) === connection || !member.connectionId)
+      if (eligible) {
+        if (player.status === 'reconnecting' && this.now() >= player.reconnectUntil) { this.lose(player, 'Đã quá 5 phút nối lại. Chờ quản trò mở phiên mới.'); changed = true }
+        if (player.status === 'lost') continue
+        if (this.connections.get(player.id) !== connection && player.activeQuestion !== null) { this.answer(player, -1, '', this.now(), false, true); changed = true }
+        this.connections.set(player.id, connection!)
+        if (!player.connected || player.status === 'reconnecting') { player.connected = true; player.reconnectUntil = 0; if (this.room.phase === 'playing') player.status = 'playing'; changed = true }
+      } else if (player.connected) {
+        if (player.activeQuestion !== null) this.answer(player, -1, '', this.now(), false, true)
+        player.connected = false; player.reconnectUntil = this.now() + reconnectGraceMs
+        if (player.status === 'playing') player.status = 'reconnecting'
+        changed = true
+      }
     }
     if (changed) this.revise()
     return changed
   }
   private revise() { this.room.version++; this.room.serverTime = this.now() }
+  isCurrentConnection(id: string, connectionId: string) { return this.connections.get(id) === connectionId && this.room.players.some(player => player.id === id && player.connected) }
   private lose(player: Player, reason: string) {
     if (player.activeQuestion !== null) this.answer(player, -1, '', this.now(), false, true)
     player.status = 'lost'; player.activeQuestion = null; player.questionDeadline = 0; player.reason = reason
@@ -61,9 +77,9 @@ export class GameRoom {
   }
   command(id: string, message: Record<string, unknown>) {
     if (message.type === 'start') {
-      if (id !== this.room.hostId || this.room.phase !== 'waiting' || !this.room.players.length) return false
+      if (id !== this.room.hostId || this.room.phase !== 'waiting' || !this.room.players.some(player => player.connected)) return false
       this.room.phase = 'playing'; this.room.startedAt = this.now()
-      this.room.players.forEach((player, index) => { player.status = 'playing'; player.position = { x: ((index % 3) - 1) * .9, z: 8 - Math.floor(index / 3) * .65, yaw: 0 } })
+      this.room.players.forEach((player, index) => { player.status = player.connected ? 'playing' : 'reconnecting'; player.position = { x: ((index % 3) - 1) * .9, z: 8 - Math.floor(index / 3) * .65, yaw: 0 } })
       this.revise(); return true
     }
     if (message.type === 'end') {
@@ -71,7 +87,7 @@ export class GameRoom {
       this.tick()
       this.room.phase = 'ended'; this.room.endedAt = this.now()
       for (const player of this.room.players) {
-        if (player.status === 'playing') player.status = 'finished'
+        if (player.status === 'playing' || player.status === 'reconnecting') player.status = 'finished'
         player.activeQuestion = null; player.questionDeadline = 0; player.questionOpenedAt = 0
       }
       this.revise(); return true
@@ -81,6 +97,7 @@ export class GameRoom {
       this.room.phase = 'waiting'; this.room.startedAt = 0; this.room.endedAt = 0
       this.room.sessionId = this.room.hostId + '-' + this.now() + '-' + (this.room.version + 1)
       this.room.players = this.room.players.map(player => waitingPlayer({ ...player, host: false, joinedAt: this.now() }))
+      this.connections.clear()
       this.revise(); return true
     }
     if (this.room.phase !== 'playing') return false
@@ -111,6 +128,9 @@ export class GameRoom {
     const changed: string[] = [], now = this.now()
     if (this.room.phase !== 'playing') return changed
     for (const player of this.room.players) {
+      if (player.status === 'reconnecting' && now >= player.reconnectUntil) {
+        this.lose(player, 'Đã quá 5 phút nối lại. Chờ quản trò mở phiên mới.'); changed.push(player.id)
+      }
       if (player.status === 'playing' && player.questionDeadline && now >= player.questionDeadline) {
         this.answer(player, -1, '', player.questionDeadline, true); changed.push(player.id)
       }
