@@ -1,5 +1,5 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
-import { GameRoom, rankPlayers, playerRank, waitingPlayer, type Member, type Player, type Room } from './GameRoom'
+import { GameRoom, rankPlayers, playerRank, type Member, type Player, type Room } from './GameRoom'
 import { getSupabase } from './Supabase'
 import { clearPlayerSession, readPlayerSession, savePlayerSession, type PlayerSession } from './PlayerSession'
 export type { AnswerResult, Player, Room } from './GameRoom'
@@ -21,6 +21,7 @@ export class Multiplayer {
   private playerSession?: PlayerSession
   private retryTimer?: number
   private member?: Member
+  private stateTimer?: number
   constructor(private changed: (room: Room) => void, private disconnected: () => void, private error: (message: string) => void) {}
   get serverNow() { return Date.now() + this.timeOffset }
   get isHost() { return this.room?.hostId === this.id }
@@ -94,6 +95,9 @@ export class Multiplayer {
           this.syncPresence()
           if (!this.room) this.room = { code: 'HCM202', sessionId: '', hostId: '', phase: 'waiting', startedAt: 0, endedAt: 0, serverTime: Date.now(), version: 0, players: [] }
           this.changed(this.room)
+          if (!host && !this.stateTimer) this.stateTimer = window.setInterval(() => {
+            if (this.subscribed) void this.broadcast('requestState', { id: this.id, connectionId: this.connectionId })
+          }, 1000)
           if (this.timer) window.clearInterval(this.timer)
           this.timer = window.setInterval(() => {
             if (!this.model || !this.isHost) return
@@ -121,16 +125,15 @@ export class Multiplayer {
       for (const player of this.model.room.players) this.publishPlayer(player.id)
     } else {
       this.model = undefined
-      if (!this.room || this.room.phase === 'waiting') {
-        this.room = { code: 'HCM202', sessionId: this.room?.sessionId ?? '', hostId, phase: 'waiting', startedAt: 0, endedAt: 0, serverTime: Date.now(), version: 0, players: this.members.filter(member => !member.host).map(waitingPlayer) }
-        this.changed(this.room)
-      }
+      // Presence identifies the host; only its snapshot determines the game phase.
       if (hostId) void this.broadcast('requestState', { id: this.id, connectionId: this.connectionId })
     }
   }
   private receiveState(room: Room) {
     if (room.code !== 'HCM202' || !this.members.some(member => member.id === room.hostId && member.host)) return
     if (this.room?.hostId === room.hostId && room.version < this.room.version) return
+    if (this.stateTimer) window.clearInterval(this.stateTimer)
+    this.stateTimer = undefined
     this.timeOffset = room.serverTime - Date.now()
     if (room.sessionId !== this.room?.sessionId) this.self = undefined
     room.players = room.players.map(player => ({ ...player, answers: player.id === this.id ? this.self?.answers ?? [] : [] }))
@@ -167,6 +170,8 @@ export class Multiplayer {
     const channel = this.channel; this.channel = undefined; this.subscribed = false
     if (this.timer) window.clearInterval(this.timer)
     if (this.retryTimer) window.clearTimeout(this.retryTimer)
+    if (this.stateTimer) window.clearInterval(this.stateTimer)
+    this.stateTimer = undefined
     this.retryTimer = undefined
     this.timer = undefined; this.model = undefined; this.self = undefined; this.members = []; this.room = undefined; this.id = ''; this.positionSignature = ''; this.member = undefined; this.playerSession = undefined
     if (channel) void this.client?.removeChannel(channel)

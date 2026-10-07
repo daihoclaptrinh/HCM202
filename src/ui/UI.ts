@@ -7,6 +7,7 @@ import { visitorColors, visitorNames } from '../world/Visitors'
 import type { Player, Room } from '../systems/Multiplayer'
 import { rankPlayers, playerRank, stageSeconds } from '../systems/GameRoom'
 import { quizStations } from '../data/quizStations'
+import { readPlayerSession } from '../systems/PlayerSession'
 
 type AppState = 'LOADING' | 'START_SCREEN' | 'EXPLORING' | 'ARTIFACT_OPEN' | 'CREDITS'
 type UIHandlers = { visit: (mode: 'free' | 'guided') => void; start: () => void; end: () => void; newSession: () => void; downloadResults: () => void; openQuestion: (index: number) => void; host: () => Promise<void>; resume: () => Promise<void>; home: () => void; close: () => void; mute: () => boolean; narration: () => void; listenHere: () => void; transcript: () => void; credits: () => void; restart: () => void; nextTourStep: () => void; exitGuided: () => void; pauseTour: () => void; join: (name: string, avatar: number) => Promise<void>; submitAnswer: (stage: number, index: number, choice: number, text: string) => void }
@@ -34,6 +35,7 @@ export class UI {
     this.root.innerHTML = `
       <canvas id="museum-canvas" aria-label="Không gian bảo tàng ảo"></canvas>
       <div id="loading" class="screen" role="status"><div><p class="eyebrow">BẢO TÀNG ẢO</p><h1>BẢO TÀNG TƯ TƯỞNG HỒ CHÍ MINH</h1><div class="load-track"><i></i></div><p class="muted">Đang chuẩn bị không gian triển lãm...</p></div></div>
+      <div id="session-status" class="screen hidden" role="status"><div><p class="eyebrow">PHÒNG HCM202</p><h2>Tiếp tục phiên chơi</h2><p id="session-message" aria-live="polite"></p><button id="retry-session" hidden>THỬ NỐI LẠI</button></div></div>
       <div id="start" class="screen hidden"><div><p class="eyebrow">BẢO TÀNG ẢO</p><h1>BẢO TÀNG<br>TƯ TƯỞNG<br>HỒ CHÍ MINH</h1><p>Quá trình hình thành và phát triển<br>Tư tưởng Hồ Chí Minh</p><p class="instructions">WASD để di chuyển · Kéo chuột để quan sát<br>Khuyến nghị sử dụng tai nghe</p></div></div>
       <div id="hud" class="hidden"><button id="home-button" class="hidden" aria-label="Về trang chủ">← TRANG CHỦ</button><div id="chapter" aria-live="polite">MỞ ĐẦU</div><div class="audio-controls"><button id="audio" aria-label="Tắt âm thanh" aria-pressed="false">ÂM THANH</button><button id="narration" aria-label="Nghe thuyết minh" disabled>▶ NGHE THUYẾT MINH</button><button id="transcript-button" aria-label="Xem nội dung thuyết minh">NỘI DUNG THUYẾT MINH</button><span id="audio-status" class="sr-only" aria-live="polite"></span></div><div id="help">W A S D&nbsp;&nbsp; Di chuyển<br>DRAG&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Quan sát<br>E&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Khám phá</div><div id="focus"></div><div id="prompt" aria-live="polite"></div></div>
       <aside id="artifact" class="panel" role="dialog" aria-modal="true" aria-labelledby="artifact-title" hidden><button class="close" aria-label="Đóng">×</button><p class="eyebrow artifact-code"></p><h2 id="artifact-title" class="artifact-title"></h2><p class="artifact-year"></p><img class="artifact-image" alt="" hidden><p class="artifact-description"></p><hr><p class="artifact-stage muted"></p></aside>
@@ -161,10 +163,29 @@ export class UI {
 
   q<T extends HTMLElement = HTMLElement>(selector: string) { const element = this.root.querySelector<T>(selector); if (!element) throw new Error(`Required UI element ${selector} was not found`); return element }
   progress(value: number) { this.q('.load-track i').style.width = `${value * 100}%` }
-  ready() { this.state = 'START_SCREEN'; this.q('#loading').classList.add('hidden'); this.q('#start').classList.remove('hidden'); this.q('#visit-tab').focus(); if (location.pathname === '/start') void this.handlers.host().catch(error => this.setLobbyMessage(error instanceof Error ? error.message : 'Không kết nối được Supabase.')); else if (location.pathname === '/play') void this.handlers.resume().catch(error => this.setLobbyMessage(error instanceof Error ? error.message : 'Không khôi phục được phiên.')) }
-  explore() { this.state = 'EXPLORING'; this.q('#start').classList.add('hidden'); this.q('#hud').classList.remove('hidden'); this.root.classList.toggle('competition-active', !this.sightseeing); if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); this.q('#help').classList.remove('faded') }
+  ready() {
+    this.q('#loading').classList.add('hidden')
+    if (location.pathname === '/play' && readPlayerSession()) { this.resumeSession(); return }
+    this.showHome()
+    if (location.pathname === '/start') void this.handlers.host().catch(error => this.setLobbyMessage(error instanceof Error ? error.message : 'Không kết nối được Supabase.'))
+  }
+  private resumeSession() {
+    this.showSessionStatus('Đang nối lại phiên chơi đã lưu…')
+    void this.handlers.resume().catch(error => {
+      this.showSessionStatus(error instanceof Error ? error.message : 'Không khôi phục được phiên.', true)
+    })
+  }
+  showSessionStatus(message: string, retry = false) {
+    this.state = 'START_SCREEN'
+    this.q('#start').classList.add('hidden'); this.q('#hud').classList.add('hidden')
+    this.q('#session-message').textContent = message
+    this.q('#retry-session').hidden = !retry
+    this.q('#retry-session').onclick = () => this.resumeSession()
+    this.q('#session-status').classList.remove('hidden')
+  }
+  explore() { this.state = 'EXPLORING'; this.q('#session-status').classList.add('hidden'); this.q('#start').classList.add('hidden'); this.q('#hud').classList.remove('hidden'); this.root.classList.toggle('competition-active', !this.sightseeing); if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); this.q('#help').classList.remove('faded') }
   setHomeControl(show: boolean) { this.q('#home-button').classList.toggle('hidden', !show) }
-  showHome() { this.state = 'START_SCREEN'; this.q('#hud').classList.add('hidden'); this.q('#start').classList.remove('hidden'); this.q('#visit-tab').focus() }
+  showHome() { this.state = 'START_SCREEN'; this.q('#session-status').classList.add('hidden'); this.q('#hud').classList.add('hidden'); this.q('#start').classList.remove('hidden'); this.q('#visit-tab').focus() }
   setChapter(chapter?: Chapter) { this.hudChapter.innerHTML = chapter ? `0${chapter.index} / 05<br><span>${chapter.period}</span>` : '' }
   setPrompt(show: boolean) { this.prompt.textContent = show ? 'E - KHÁM PHÁ' : ''; this.q('#focus').classList.toggle('active', show) }
   setNarrationControl(show: boolean) { this.q('#narration').classList.toggle('hidden', !show) }
@@ -214,7 +235,7 @@ export class UI {
     this.q('#journal-title + p').textContent = sightseeing ? 'Khám phá tư liệu và kết nối năm giai đoạn hình thành tư tưởng Hồ Chí Minh.' : 'Khám phá tư liệu và trả lời câu hỏi để kết nối năm giai đoạn.'
   }
   setStartAllowed(allowed: boolean) { this.q<HTMLButtonElement>('#start-button').disabled = !allowed }
-  setLobbyMessage(message: string) { this.q(location.pathname === '/start' ? '#host-status' : '#room-message').textContent = message }
+  setLobbyMessage(message: string) { this.q(location.pathname === '/start' ? '#host-status' : '#room-message').textContent = message; if (!this.q('#session-status').classList.contains('hidden')) this.q('#session-message').textContent = message }
   updateLobby(room: Room, myId: string) {
     const host = room.hostId === myId, me = room.players.find(player => player.id === myId)
     this.setStartAllowed(host && room.phase === 'waiting' && room.players.some(player => player.connected))
@@ -334,6 +355,7 @@ export class UI {
     if (!seconds) this.q<HTMLButtonElement>('#submit-stage').disabled = true
   }
   showSessionResult(room: Room, myId: string) {
+    this.q('#session-status').classList.add('hidden')
     const me = room.players.find(player => player.id === myId)
     this.closePanels(); this.hideLesson(); this.setGuidedTour(false)
     this.q('#question-hunt').hidden = true; this.q('#question-panel').hidden = true; this.q('#question-blocker').hidden = true; this.q('#hud').classList.add('hidden')
@@ -353,7 +375,8 @@ export class UI {
     this.quizKey = ''; this.huntKey = ''; this.roomKey = ''
     this.closePanels(); this.hideLesson(); this.setGuidedTour(false)
     this.q('#question-panel').hidden = true; this.q('#question-blocker').hidden = true; this.q('#question-hunt').hidden = true
-    this.showHome(); this.setLobbyMessage(message)
+    if (location.pathname === '/start') { this.showHome(); this.setLobbyMessage(message) }
+    else this.showSessionStatus(message, true)
   }
   markListened(listened: boolean) {
     this.q('#lesson-listen').hidden = listened

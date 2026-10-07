@@ -18,6 +18,23 @@ const bank = require('../src/data/quizBank.json')
         const response = await route.fetch(), source = await response.text()
         await route.fulfill({ response, body: source.replace('client.channel(', 'client.channel(' + JSON.stringify(testTopic) + ' + ') })
       })
+      await context.addInitScript(() => {
+        const resuming = !!localStorage.getItem('hcm202-player-session-v4')
+        window.entryScreenShown = false
+        new MutationObserver(() => {
+          const entry = document.querySelector('#start')
+          if (resuming && entry && !entry.classList.contains('hidden')) window.entryScreenShown = true
+        }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] })
+        // Delay the first host snapshots to exercise recovery requests.
+        if (resuming && window.fixtureBroadcast) {
+          const broadcast = window.fixtureBroadcast
+          let remaining = 2
+          window.fixtureBroadcast = packet => {
+            if (remaining && ['state', 'player'].includes(packet.event)) { if (packet.event === 'state') remaining--; return }
+            broadcast(packet)
+          }
+        }
+      })
       await context.route('**/src/main.ts*', async route => {
         const response = await route.fetch(), source = await response.text()
         assert(source.includes('new Experience()'))
@@ -41,6 +58,9 @@ const bank = require('../src/data/quizBank.json')
     const originalId = await guest.evaluate(() => window.testExperience.multiplayer.id)
     await guest.reload()
     await guest.waitForFunction(id => window.testExperience.multiplayer.id === id && !!window.testExperience.multiplayer.me, originalId)
+    await guest.locator('#session-status').waitFor({ state: 'visible' })
+    assert.equal(await guest.locator('#start').isVisible(), false, 'Waiting recovery skips entry form')
+    assert.equal(await guest.evaluate(() => window.entryScreenShown), false, 'No entry flash during recovery')
     assert.equal(await host.evaluate(() => window.testExperience.multiplayer.room.players.length), 2, 'Waiting reload retains identity')
     await host.click('#start-button')
     for (const page of [guest, peer]) {
@@ -72,6 +92,8 @@ const bank = require('../src/data/quizBank.json')
     await guest.reload()
     await guest.locator('#hud').waitFor({ state: 'visible' })
     await guest.waitForFunction(() => window.testExperience.audio.snapshot.state === 'paused')
+    assert.equal(await guest.evaluate(() => window.entryScreenShown), false, 'Playing recovery never shows entry form')
+    assert.equal(await guest.locator('#session-status').isVisible(), false)
     assert.equal(await guest.evaluate(() => window.testExperience.multiplayer.id), originalId)
     assert(await guest.evaluate(() => window.testExperience.audio.narration.element.currentTime >= 12), 'Partial story position restored')
     assert.equal(await guest.locator('[data-question="24"]').isDisabled(), true, 'Reload cannot bypass listening')
@@ -178,7 +200,7 @@ const bank = require('../src/data/quizBank.json')
     assert.equal(exported.sessionId, archive.sessionId)
     await host.click('#new-session')
     for (const page of [guest, peer]) {
-      await page.locator('#start').waitFor({ state: 'visible' })
+      await page.locator('#session-status').waitFor({ state: 'visible' })
       await page.waitForFunction(() => window.testExperience.multiplayer.me?.answers.length === 0)
       assert.equal(await page.evaluate(() => window.testExperience.multiplayer.me.score), 0)
       assert(await page.evaluate(key => !!localStorage.getItem(key), tokenKey), 'New round creates a resume record')
@@ -196,6 +218,9 @@ const bank = require('../src/data/quizBank.json')
     await guest.reload()
     await guest.locator('#result-screen').waitFor({ state: 'visible' })
     assert.equal(await guest.evaluate(key => localStorage.getItem(key), tokenKey), null, 'Offline guest learns host ended on reconnect')
+    await guest.reload()
+    await guest.locator('#join-room').waitFor({ state: 'visible' })
+    assert.equal(await guest.locator('#session-status').isVisible(), false, 'Entry form is available after session ends')
     assert.deepEqual(errors, [])
     console.log('PASS: F5 identity/progress/audio recovery, no duplicate avatars, question reload penalty, host token removal including offline guest, next-session recovery and existing competition rules')
   } finally { await browser.close() }

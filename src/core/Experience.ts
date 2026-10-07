@@ -82,7 +82,7 @@ export class Experience {
       resume: async () => {
         this.ui.setLobbyMessage('Đang tìm lại phiên chơi đã lưu...')
         const restored = await this.multiplayer.resume()
-        if (!restored) this.ui.setLobbyMessage('')
+        if (!restored) this.ui.showHome()
       },
       home: () => this.home(),
       close: () => this.closePanels(),
@@ -610,6 +610,7 @@ export class Experience {
       return
     }
     if (!me) return
+    if (room.phase === 'waiting') { if (location.pathname !== '/start') this.ui.showSessionStatus(`${me.name}, bạn đã vào phòng. Chờ quản trò bắt đầu phiên chơi.`); return }
     if (room.phase === 'playing' && me.status === 'playing' && !this.gameActive && !this.started) this.beginGame('free')
     if (me.status === 'reconnecting') {
       this.saveAudioProgress(); this.gameActive = false; this.started = false; this.guided = false
@@ -618,7 +619,7 @@ export class Experience {
     }
     if (me.status === 'lost') {
       if (this.gameActive) this.loseGame(me.reason ?? 'Lượt chơi đã kết thúc.')
-      else this.ui.setLobbyMessage(me.reason ?? 'Không thể nối lại. Chờ quản trò mở phiên mới.')
+      else this.ui.showSessionStatus(me.reason ?? 'Không thể nối lại. Chờ quản trò mở phiên mới.')
       return
     }
     const signature = `${me.activeQuestion}:${me.answers.length}:${me.listened.join(',')}`
