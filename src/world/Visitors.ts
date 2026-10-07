@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { textPlane } from './TextFactory'
+import { textTexture } from './TextFactory'
 import type { Player } from '../systems/Multiplayer'
 export const visitorColors = ['#b98b4f', '#518d82', '#617fb0', '#a76379']
 export const visitorNames = ['Nhà khám phá', 'Nhà nghiên cứu', 'Người kể chuyện', 'Người lưu giữ']
@@ -25,15 +25,33 @@ export class Visitors {
           const arm = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, .55, 8), outfit); arm.position.set(side * .26, .95, 0); arm.rotation.z = side * .15
           group.add(leg, arm)
         }
-        const label = textPlane(player.name, 1.2, .3, { size: 50, align: 'center', background: '#211b17' }); label.position.y = 1.9; group.add(label)
+        const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: textTexture(player.name, { width: 1024, height: 192, size: 72, align: 'center', background: '#211b17' }), depthTest: true }))
+        label.scale.set(1.45, .28, 1); label.position.y = 1.95; group.add(label)
+        group.position.set(player.position.x, 0, player.position.z)
         this.models.set(player.id, group); this.scene.add(group)
       }
-      group.position.set(player.position.x, 0, player.position.z)
-      group.rotation.y = player.position.yaw
+      if (Math.hypot(group.position.x - player.position.x, group.position.z - player.position.z) > 6) group.position.set(player.position.x, 0, player.position.z)
+      group.userData.target = player.position
     }
     for (const [id, group] of this.models) if (!active.has(id)) {
       this.scene.remove(group); this.models.delete(id)
-      group.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); const materials = Array.isArray(object.material) ? object.material : [object.material]; for (const material of new Set(materials)) material.dispose() } })
+      group.traverse(object => { if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) object.geometry.dispose(); const materials = Array.isArray(object.material) ? object.material : [object.material]; for (const material of new Set(materials)) { if ('map' in material) (material.map as THREE.Texture | null)?.dispose(); material.dispose() } } })
+    }
+  }
+  animate(delta: number, cameraPosition: THREE.Vector3) {
+    const blend = 1 - Math.exp(-12 * delta)
+    for (const group of this.models.values()) {
+      const target = group.userData.target as Player['position']
+      if (!target) continue
+      group.position.x = THREE.MathUtils.lerp(group.position.x, target.x, blend)
+      group.position.z = THREE.MathUtils.lerp(group.position.z, target.z, blend)
+      group.rotation.y += Math.atan2(Math.sin(target.yaw - group.rotation.y), Math.cos(target.yaw - group.rotation.y)) * blend
+      const distance = Math.hypot(group.position.x - cameraPosition.x, group.position.z - cameraPosition.z)
+      group.visible = distance > .65
+      for (const child of group.children) if (child instanceof THREE.Sprite) {
+        const width = Math.min(1.45, distance * .22)
+        child.scale.set(width, width * .2, 1)
+      }
     }
   }
 }

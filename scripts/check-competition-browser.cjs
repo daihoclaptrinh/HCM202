@@ -1,82 +1,115 @@
 const { chromium } = require('playwright-core')
 const assert = require('node:assert/strict')
 const path = require('node:path')
+const os = require('node:os')
+const fs = require('node:fs/promises')
 const bank = require('../src/data/quizBank.json')
 ;(async () => {
-  const browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_PATH || path.join(process.env.LOCALAPPDATA, 'ms-playwright/chromium-1234/chrome-win64/chrome.exe') })
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe' })
   try {
     const base = process.env.GAME_URL || 'http://127.0.0.1:5173'
-    const fixtureMembers = new Map()
-    const errors = []
+    const members = new Map(), errors = []
+    const realTransport = process.env.MOCK_REALTIME === '0'
+    const testTopic = 'hcm202-check-' + Date.now() + '-'
     async function open(route) {
-      const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
-      if (process.env.MOCK_REALTIME === '1') await require('./realtime-fixture.cjs')(context, fixtureMembers)
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+      if (!realTransport) await require('./realtime-fixture.cjs')(context, members)
+      else await context.route('**/src/systems/Multiplayer.ts*', async route => {
+        const response = await route.fetch(), source = await response.text()
+        await route.fulfill({ response, body: source.replace('client.channel(', 'client.channel(' + JSON.stringify(testTopic) + ' + ') })
+      })
+      await context.route('**/src/main.ts*', async route => {
+        const response = await route.fetch(), source = await response.text()
+        assert(source.includes('new Experience()'))
+        await route.fulfill({ response, body: source.replace('new Experience()', '(window.testExperience = new Experience())') })
+      })
       const page = await context.newPage()
       page.on('pageerror', error => errors.push(error.message))
-      await page.addInitScript(() => { const Native = window.Audio; window.testAudio = []; window.Audio = class extends Native { constructor(...args) { super(...args); window.testAudio.push(this) } } })
       await page.goto(base + route)
       return page
     }
     const host = await open('/start')
-    await host.locator('#start-button').waitFor({ state: 'visible', timeout: 60000 })
-    await host.waitForFunction(() => document.querySelector('#host-status').textContent.includes('0 người'), undefined, { timeout: 20000 })
-    assert.equal(await host.locator('#host-entry button').count(), 1)
-    assert.equal(await host.locator('#join-room').isVisible(), false)
+    await host.waitForFunction(() => document.querySelector('#host-status').textContent.includes('0 người'))
     const guest = await open('/play'), peer = await open('/play')
     for (const [page, name] of [[guest, 'Người A'], [peer, 'Người B']]) {
-      await page.locator('#join-room').waitFor({ state: 'visible', timeout: 60000 })
-      assert.equal(await page.locator('#room-code, #player-mode, #guided-button').count(), 0)
-      assert.equal(await page.locator('#start-button').isVisible(), false)
+      await page.locator('#join-room').waitFor({ state: 'visible' })
       await page.fill('#player-name', name); await page.click('#join-room')
-      try { await page.waitForFunction(() => document.querySelector('#room-message').textContent.includes('Đã vào phòng HCM202'), undefined, { timeout: 20000 }) }
-      catch (error) { console.log('Lobby diagnostic:', await page.locator('#room-message').textContent(), errors); throw error }
-      assert.equal(await page.locator('#hud').isVisible(), false)
+      await page.waitForFunction(() => document.querySelector('#room-message').textContent.includes('Đã vào phòng HCM202'))
     }
     await host.waitForFunction(() => document.querySelector('#host-roster').textContent.includes('Người B'))
-    await host.screenshot({ path: 'review-room-lobby.png' })
     await host.click('#start-button')
     for (const page of [guest, peer]) {
       await page.locator('#hud').waitFor({ state: 'visible' })
       await page.waitForFunction(() => document.querySelector('#museum-canvas').dataset.visitors === '1')
       assert.equal(await page.locator('#guided-controls').isVisible(), false)
+      assert.equal(await page.evaluate(() => window.testExperience.controls.movementLocked), false)
+      assert.equal(await page.evaluate(() => window.testExperience.multiplayer.me.activeQuestion), null)
     }
-    async function listen(suffix) {
-      await guest.waitForFunction(suffix => window.testAudio.some(audio => audio.src.endsWith(suffix) && !audio.paused), suffix, { timeout: 30000 })
-      await guest.evaluate(suffix => { const audio = window.testAudio.find(audio => audio.src.endsWith(suffix)); audio.playbackRate = 16; audio.currentTime = audio.duration - .5 }, suffix)
+    await guest.keyboard.down('KeyW'); await guest.waitForTimeout(1800); await guest.keyboard.up('KeyW')
+    assert(await guest.evaluate(() => window.testExperience.camera.position.z < 6), 'Can walk before listening')
+    async function move(page, z) {
+      await page.evaluate(z => { const e = window.testExperience; e.camera.position.set(0, 1.68, z); e.controls.setOrientation(0, 0) }, z)
+      await page.waitForTimeout(350)
     }
-    await listen('/00-introduction.mp3')
-    await listen('/01-before-1911.mp3')
-    await guest.locator('#stage-quiz').waitFor({ state: 'visible' })
-    assert.equal(await guest.locator('.stage-question').count(), 1)
-    const protection = await guest.evaluate(() => {
-      const question = document.querySelector('.stage-question p'), selection = window.getSelection(), range = document.createRange()
-      range.selectNodeContents(question); selection.removeAllRanges(); selection.addRange(range)
-      const copy = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: new DataTransfer() })
-      const keyboard = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true })
-      const contextMenu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-      const drag = new Event('dragstart', { bubbles: true, cancelable: true })
-      document.body.dispatchEvent(copy); document.body.dispatchEvent(keyboard); question.dispatchEvent(contextMenu); question.dispatchEvent(drag)
-      selection.removeAllRanges()
-      return { copy: copy.defaultPrevented, keyboard: keyboard.defaultPrevented, contextMenu: contextMenu.defaultPrevented, drag: drag.defaultPrevented, selection: getComputedStyle(question).userSelect }
-    })
-    assert.deepEqual(protection, { copy: true, keyboard: true, contextMenu: true, drag: true, selection: 'none' })
-    for (let index = 0; index < 6; index++) {
-      await guest.waitForFunction(index => Number(document.querySelector('#stage-quiz').dataset.index) === index, index)
-      assert.match(await guest.locator('#quiz-timer').innerText(), /giây/)
-      if (bank[0][index].answer === 3) {
-        await guest.click('#answer-other'); await guest.fill('#manual-answer', bank[0][index].manualAnswer)
-        assert.equal(await guest.locator('#manual-answer').evaluate(input => { const copy = new ClipboardEvent('copy', { bubbles: true, cancelable: true }); input.dispatchEvent(copy); return copy.defaultPrevented }), false)
-      }
-      else await guest.locator(`input[name="stage-answer"][value="${bank[0][index].answer}"]`).check()
-      await guest.click('#submit-stage')
+    await move(guest, -47.3); await move(peer, -49)
+    await guest.locator('[data-question="24"]').waitFor({ state: 'visible' })
+    // Billboard names and avatars remain present while both players explore.
+    assert.equal(await guest.evaluate(() => [...window.testExperience.visitors.models.values()][0].children.some(child => child.isSprite)), true)
+    await guest.screenshot({ path: path.join(os.tmpdir(), 'hcm202-free-players.png') })
+    await guest.click('#lesson-listen')
+    await guest.waitForFunction(() => window.testExperience.audio.snapshot.state === 'playing')
+    await move(guest, -46)
+    assert.equal(await guest.evaluate(() => window.testExperience.audio.snapshot.state), 'playing', 'Story continues across zones')
+    await move(guest, -47.3)
+    await guest.click('[data-question="24"]')
+    await guest.locator('#question-panel').waitFor({ state: 'visible' })
+    const entry = bank[4][0]
+    await guest.locator('input[name="stage-answer"][value="' + entry.answer + '"]').check()
+    await guest.click('#submit-stage')
+    await guest.waitForFunction(() => window.testExperience.multiplayer.me.score === 100)
+    assert.equal(await guest.evaluate(() => window.testExperience.multiplayer.me.listened.length), 0)
+    await guest.click('#close-question')
+    // Return to an earlier area and choose a non-first question.
+    await move(guest, -5.2)
+    await guest.click('[data-question="3"]')
+    await guest.locator('#question-panel').waitFor({ state: 'visible' })
+    const deadline = await guest.evaluate(() => window.testExperience.multiplayer.me.questionDeadline)
+    await guest.click('#close-question'); await move(guest, 0)
+    assert.equal(await guest.evaluate(() => window.testExperience.multiplayer.me.questionDeadline), deadline)
+    await guest.click('#resume-question')
+    await guest.click('#answer-other'); await guest.fill('#manual-answer', '1911'); await guest.click('#submit-stage')
+    await guest.waitForFunction(() => window.testExperience.multiplayer.me.score === 200)
+    await peer.click('[data-question="25"]')
+    await peer.waitForFunction(() => window.testExperience.multiplayer.me.answers.some(answer => answer.index === 25 && answer.timedOut), undefined, { timeout: 10000 })
+    assert.equal(await peer.evaluate(() => window.testExperience.multiplayer.me.activeQuestion), null)
+    await host.screenshot({ path: path.join(os.tmpdir(), 'hcm202-host-live.png') })
+    await host.click('#end-session')
+    await guest.locator('#result-screen').waitFor({ state: 'visible' })
+    await peer.locator('#result-screen').waitFor({ state: 'visible' })
+    const archive = await host.evaluate(() => JSON.parse(localStorage.getItem('hcm202-last-results-v2')))
+    assert.equal(archive.phase, 'ended')
+    assert.equal(archive.players[0].name, 'Người A')
+    assert.equal(archive.players[0].score, 200)
+    assert.equal(archive.players[0].answers.length, 2)
+    assert(archive.players[0].answers.every(answer => Number.isInteger(answer.elapsedMs) && answer.elapsedMs > 0))
+    assert.equal(archive.players[0].correctTimeMs, archive.players[0].answers.reduce((sum, answer) => sum + answer.elapsedMs, 0))
+    assert.equal(await host.locator('#host-ranking tbody tr').count(), 2)
+    await guest.screenshot({ path: path.join(os.tmpdir(), 'hcm202-session-results.png') })
+    const downloadEvent = host.waitForEvent('download')
+    await host.click('#download-results')
+    const download = await downloadEvent
+    const exported = JSON.parse(await fs.readFile(await download.path(), 'utf8'))
+    assert.equal(exported.sessionId, archive.sessionId)
+    await host.click('#new-session')
+    for (const page of [guest, peer]) {
+      await page.locator('#start').waitFor({ state: 'visible' })
+      await page.waitForFunction(() => window.testExperience.multiplayer.me?.answers.length === 0)
+      assert.equal(await page.evaluate(() => window.testExperience.multiplayer.me.score), 0)
     }
-    await guest.waitForFunction(() => document.querySelector('#my-score').textContent.includes('600'))
-    await host.waitForFunction(() => document.querySelector('#score-players').textContent.includes('600'))
-    await peer.waitForFunction(() => document.querySelector('#score-players').textContent.includes('600'))
-    await guest.screenshot({ path: 'review-stage-quiz.png' })
-    await guest.evaluate(() => { window.dispatchEvent(new Event('blur')); document.dispatchEvent(new Event('fullscreenchange')) })
-    assert.equal(await guest.locator('#result-screen').isVisible(), false)
+    await host.click('#start-button')
+    await guest.locator('#hud').waitFor({ state: 'visible' })
+    await guest.waitForFunction(() => document.querySelector('#museum-canvas').dataset.visitors === '1')
     assert.deepEqual(errors, [])
-    console.log(`PASS (${process.env.MOCK_REALTIME === '1' ? 'test transport' : 'real Supabase'}): host starts all, automatic audio, timed questions, blocked question copy/selection/context menu/drag, editable manual answers, named scores and no screen-exit penalty`)
+    console.log('PASS: free movement, optional story across zones, out-of-order questions, avatars, timers, host end, ms archive/export, rankings and next session')
   } finally { await browser.close() }
 })().catch(error => { console.error(error); process.exitCode = 1 })

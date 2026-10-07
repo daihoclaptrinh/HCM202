@@ -1,5 +1,5 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
-import { GameRoom, type Member, type Player, type Room } from './GameRoom'
+import { GameRoom, rankPlayers, playerRank, waitingPlayer, type Member, type Player, type Room } from './GameRoom'
 import { getSupabase } from './Supabase'
 export type { AnswerResult, Player, Room } from './GameRoom'
 
@@ -31,23 +31,23 @@ export class Multiplayer {
     if (generation !== this.generation) throw new Error('Đã hủy vào phòng.')
     this.id = crypto.randomUUID()
     const member: Member = { id: this.id, name: name.slice(0, 24), avatar, host, joinedAt: Date.now() }
-    const channel = client.channel(import.meta.env.VITE_SUPABASE_REALTIME_TOPIC || 'hcm202', { config: { presence: { key: this.id }, broadcast: { ack: true, self: false } } })
+    const channel = client.channel(`${import.meta.env.VITE_SUPABASE_REALTIME_TOPIC || 'hcm202'}-free-v2`, { config: { presence: { key: this.id }, broadcast: { ack: true, self: false } } })
     this.channel = channel
     channel.on('presence', { event: 'sync' }, () => this.syncPresence())
       .on('broadcast', { event: 'state' }, ({ payload }) => this.receiveState(payload))
       .on('broadcast', { event: 'player' }, ({ payload }) => {
-        if (payload.hostId !== this.room?.hostId || payload.player?.id !== this.id || payload.version < (this.room?.version ?? 0)) return
+        if (payload.sessionId !== this.room?.sessionId || payload.hostId !== this.room?.hostId || payload.player?.id !== this.id || payload.version < (this.room?.version ?? 0)) return
         this.self = payload.player
         if (this.room) { this.room.players = this.room.players.map(player => player.id === this.id ? this.self! : player); this.changed(this.room) }
       })
       .on('broadcast', { event: 'command' }, ({ payload }) => {
-        if (!this.isHost || !this.model || !this.members.some(member => member.id === payload.id && !member.host)) return
+        if (!this.isHost || !this.model || payload.sessionId !== this.room?.sessionId || !this.members.some(member => member.id === payload.id && !member.host)) return
         if (this.model.command(payload.id, payload.message)) { this.publish(); this.publishPlayer(payload.id) }
       })
       .on('broadcast', { event: 'position' }, ({ payload }) => {
         const player = this.room?.players.find(player => player.id === payload.id)
         const { x, z, yaw } = payload
-        if (!player || player.status !== 'playing' || ![x, z, yaw].every(Number.isFinite) || Math.abs(x) > 8 || z < -85 || z > 13) return
+        if (payload.sessionId !== this.room?.sessionId || !player || player.status !== 'playing' || ![x, z, yaw].every(Number.isFinite) || Math.abs(x) > 8 || z < -85 || z > 13) return
         player.position = { x, z, yaw }
         const stored = this.model?.room.players.find(player => player.id === payload.id)
         if (stored) stored.position = { x, z, yaw }
@@ -65,7 +65,7 @@ export class Multiplayer {
           if (result !== 'ok') { window.clearTimeout(timeout); this.leave(); reject(new Error('Không đăng ký được người chơi với Supabase.')); return }
           joined = true; window.clearTimeout(timeout)
           this.syncPresence()
-          if (!this.room) this.room = { code: 'HCM202', hostId: '', phase: 'waiting', serverTime: Date.now(), version: 0, players: [] }
+          if (!this.room) this.room = { code: 'HCM202', sessionId: '', hostId: '', phase: 'waiting', startedAt: 0, endedAt: 0, serverTime: Date.now(), version: 0, players: [] }
           this.changed(this.room)
           if (this.timer) window.clearInterval(this.timer)
           this.timer = window.setInterval(() => {
@@ -95,7 +95,7 @@ export class Multiplayer {
     } else {
       this.model = undefined
       if (!this.room || this.room.phase === 'waiting') {
-        this.room = { code: 'HCM202', hostId, phase: 'waiting', serverTime: Date.now(), version: 0, players: this.members.filter(member => !member.host).map(member => ({ id: member.id, name: member.name, avatar: member.avatar, score: 0, status: 'waiting', answers: [], listened: -1, questionDeadline: 0, position: { x: 0, z: 8, yaw: 0 } })) }
+        this.room = { code: 'HCM202', sessionId: this.room?.sessionId ?? '', hostId, phase: 'waiting', startedAt: 0, endedAt: 0, serverTime: Date.now(), version: 0, players: this.members.filter(member => !member.host).map(waitingPlayer) }
         this.changed(this.room)
       }
     }
@@ -104,6 +104,7 @@ export class Multiplayer {
     if (room.code !== 'HCM202' || !this.members.some(member => member.id === room.hostId && member.host)) return
     if (this.room?.hostId === room.hostId && room.version < this.room.version) return
     this.timeOffset = room.serverTime - Date.now()
+    if (room.sessionId !== this.room?.sessionId) this.self = undefined
     room.players = room.players.map(player => ({ ...player, answers: player.id === this.id ? this.self?.answers ?? [] : [] }))
     this.room = room; this.changed(room)
     if (room.phase === 'playing' && !this.isHost && !room.players.some(player => player.id === this.id)) this.error('Phòng đã bắt đầu trước khi bạn vào. Chờ chủ phòng mở lượt mới.')
@@ -115,7 +116,7 @@ export class Multiplayer {
   }
   private publishPlayer(id: string) {
     const player = this.model?.room.players.find(player => player.id === id)
-    if (player) void this.broadcast('player', { hostId: this.id, version: this.model!.room.version, player })
+    if (player) void this.broadcast('player', { hostId: this.id, sessionId: this.model!.room.sessionId, version: this.model!.room.version, player })
   }
   private async broadcast(event: string, payload: unknown) {
     const result = await this.channel?.send({ type: 'broadcast', event, payload })
@@ -134,10 +135,35 @@ export class Multiplayer {
       const signature = `${Number(message.x).toFixed(2)}:${Number(message.z).toFixed(2)}:${Number(message.yaw).toFixed(2)}`
       if (signature === this.positionSignature) return
       this.positionSignature = signature
-      void this.broadcast('position', { ...message, id: this.id }); return
+      void this.broadcast('position', { ...message, id: this.id, sessionId: this.room?.sessionId }); return
     }
     if (this.isHost && this.model) {
-      if (this.model.command(this.id, message)) this.publish()
-    } else void this.broadcast('command', { id: this.id, message })
+      if (this.model.command(this.id, message)) {
+        if (message.type === 'end') this.saveResults()
+        if (message.type === 'reset') { this.model.sync(this.members); this.positionSignature = '' }
+        this.publish()
+        this.model.room.players.forEach(player => this.publishPlayer(player.id))
+      }
+    } else void this.broadcast('command', { id: this.id, sessionId: this.room?.sessionId, message })
+  }
+  private resultRecord() {
+    if (!this.model || this.model.room.phase !== 'ended') return undefined
+    const room = this.model.room
+    return { ...room, rankingRule: 'score DESC, correctTimeMs ASC; equal score and time share a rank', players: rankPlayers(room.players).map(player => ({ ...player, rank: playerRank(room.players, player) })) }
+  }
+  private saveResults() {
+    try { localStorage.setItem('hcm202-last-results-v2', JSON.stringify(this.resultRecord())) }
+    catch { this.error('Không lưu được trên trình duyệt. Hãy bấm TẢI KẾT QUẢ trước khi đóng trang.') }
+  }
+  downloadResults() {
+    let record = this.resultRecord()
+    if (!record) {
+      try { record = JSON.parse(localStorage.getItem('hcm202-last-results-v2') ?? 'null') }
+      catch { /* The current session can still be exported after it ends. */ }
+    }
+    if (!record) { this.error('Chưa có kết quả. Kết thúc một phiên chơi để tải xuống.'); return }
+    const url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' }))
+    const link = document.createElement('a'); link.href = url; link.download = `HCM202-${record.endedAt}.json`; link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 }

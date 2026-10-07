@@ -4,12 +4,14 @@ import { museumConfig as config } from '../data/museumConfig'
 import { CollisionSystem } from '../systems/CollisionSystem'
 import { boardPlane, textPlane } from './TextFactory'
 import { woodTexture } from './Materials'
+import { quizStations } from '../data/quizStations'
 
 export type Interactive = { mesh: THREE.Object3D; artifact: Artifact }
 
 export class Museum {
   readonly group = new THREE.Group()
   readonly interactives: Interactive[] = []
+  readonly quizMarkers = new THREE.Group()
   readonly chapterLights: THREE.Light[] = []
   readonly quadrantLights: THREE.SpotLight[] = []
   readonly transitionDoors: THREE.Group[] = []
@@ -39,6 +41,14 @@ export class Museum {
     this.buildTransitionDoorway()
     this.buildFinalHall(collisions)
     this.buildAmbientLighting()
+    this.quizMarkers.visible = false
+    for (const station of quizStations) {
+      const marker = textPlane(`?\nCÂU HỎI 0${station.stage + 1}`, 1.1, .85, { size: 100, align: 'center', color: '#ffdf9f', background: '#352819' })
+      marker.position.set(station.x, 2.05, station.z)
+      marker.rotation.y = station.x < 0 ? Math.PI / 2 : -Math.PI / 2
+      this.quizMarkers.add(marker)
+    }
+    this.group.add(this.quizMarkers)
   }
 
   private mesh(geometry: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number) {

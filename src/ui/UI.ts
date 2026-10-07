@@ -5,9 +5,11 @@ import { learning, artifactInsights } from '../data/learning'
 import quizBank from '../data/quizBank.json'
 import { visitorColors, visitorNames } from '../world/Visitors'
 import type { Player, Room } from '../systems/Multiplayer'
+import { rankPlayers, playerRank, stageSeconds } from '../systems/GameRoom'
+import { quizStations } from '../data/quizStations'
 
 type AppState = 'LOADING' | 'START_SCREEN' | 'EXPLORING' | 'ARTIFACT_OPEN' | 'CREDITS'
-type UIHandlers = { visit: (mode: 'free' | 'guided') => void; start: () => void; host: () => Promise<void>; home: () => void; close: () => void; mute: () => boolean; narration: () => void; transcript: () => void; credits: () => void; restart: () => void; nextTourStep: () => void; exitGuided: () => void; pauseTour: () => void; join: (name: string, avatar: number) => Promise<void>; submitAnswer: (stage: number, index: number, choice: number, text: string) => void }
+type UIHandlers = { visit: (mode: 'free' | 'guided') => void; start: () => void; end: () => void; newSession: () => void; downloadResults: () => void; openQuestion: (index: number) => void; host: () => Promise<void>; home: () => void; close: () => void; mute: () => boolean; narration: () => void; listenHere: () => void; transcript: () => void; credits: () => void; restart: () => void; nextTourStep: () => void; exitGuided: () => void; pauseTour: () => void; join: (name: string, avatar: number) => Promise<void>; submitAnswer: (stage: number, index: number, choice: number, text: string) => void }
 
 export class UI {
   readonly root: HTMLElement
@@ -19,6 +21,8 @@ export class UI {
   private previousFocus?: HTMLElement
   private discovered = new Set<string>()
   private quizKey = ''
+  private huntKey = ''
+  private roomKey = ''
   private sightseeing = false
   private inRoom = false
 
@@ -50,7 +54,7 @@ export class UI {
     this.updateDiscovery()
     this.q('#tour-pause').onclick = handlers.pauseTour
     this.root.insertAdjacentHTML('beforeend', '<section id="lesson-gate" hidden aria-label="Điểm nghe nội dung"><p class="eyebrow" id="lesson-title"></p><p id="lesson-instruction"></p><button id="lesson-listen">▶ NGHE NỘI DUNG</button><div id="upcoming-artifacts" hidden><p class="eyebrow">HIỆN VẬT SẮP TỚI</p><div id="upcoming-list"></div></div></section>')
-    this.q('#lesson-listen').onclick = handlers.narration
+    this.q('#lesson-listen').onclick = handlers.listenHere
     this.q('#lesson-gate').insertAdjacentHTML('beforeend', '<form id="stage-quiz" hidden><p id="quiz-timer" role="timer"></p><button id="review-answers" type="button" hidden>XEM KẾT QUẢ 6 CÂU</button><div id="stage-questions"></div><p id="quiz-message" aria-live="polite"></p><button id="submit-stage" type="submit">GỬI ĐÁP ÁN</button></form>')
     this.q('#review-answers').onclick = () => {
       const container = this.q('#stage-questions'); container.hidden = !container.hidden
@@ -75,7 +79,7 @@ export class UI {
       if (answerEditor(event.target)) return
       if ((event.ctrlKey || event.metaKey) && ['c', 'x'].includes(event.key.toLowerCase()) && (questions.contains(event.target as Node) || questionSelected())) event.preventDefault()
     })
-    this.q('#start .instructions').insertAdjacentHTML('beforebegin', `<div class="experience-tabs" role="group" aria-label="Chọn trải nghiệm"><button id="visit-tab" aria-pressed="true">THAM QUAN TÌM HIỂU</button><button id="competitive-tab" aria-pressed="false">CHƠI TÍNH ĐIỂM</button></div><div id="visitor-entry"><div class="visit-modes"><button id="visit-free-button">TỰ THAM QUAN</button><button id="visit-guided-button">ĐI CÙNG HƯỚNG DẪN VIÊN</button></div></div><div id="competition-entry" hidden><div class="lobby"><p class="eyebrow">PHÒNG HCM202</p><label>Tên người chơi<input id="player-name" maxlength="24" autocomplete="off" placeholder="Tên của bạn"></label><div class="avatar-options">${visitorNames.map((name, index) => `<button class="avatar-choice" data-avatar="${index}" aria-pressed="${index === 0}"><span class="avatar-figure" style="--outfit:${visitorColors[index]}"></span>${name}</button>`).join('')}</div><button id="join-room">VÀO PHÒNG CHƠI</button><p id="room-message" aria-live="polite"></p><div id="lobby-roster"></div><p class="lobby-rules">Nghe nội dung → trả lời 6 câu mỗi chặng. Mỗi câu đúng +100 điểm.<br>Thời gian theo chặng: 20 → 15 → 10 → 5 → 5 giây/câu.<br>Đồng hồ câu hỏi vẫn chạy khi chuyển tab.</p></div></div><div id="host-entry" hidden><p class="eyebrow">CHỦ PHÒNG · HCM202</p><p id="host-status" aria-live="polite">Đang kết nối phòng...</p><div id="host-roster"></div><button id="start-button" disabled>BẮT ĐẦU</button></div>`)
+    this.q('#start .instructions').insertAdjacentHTML('beforebegin', `<div class="experience-tabs" role="group" aria-label="Chọn trải nghiệm"><button id="visit-tab" aria-pressed="true">THAM QUAN TÌM HIỂU</button><button id="competitive-tab" aria-pressed="false">CHƠI TÍNH ĐIỂM</button></div><div id="visitor-entry"><div class="visit-modes"><button id="visit-free-button">TỰ THAM QUAN</button><button id="visit-guided-button">ĐI CÙNG HƯỚNG DẪN VIÊN</button></div></div><div id="competition-entry" hidden><div class="lobby"><p class="eyebrow">PHÒNG HCM202</p><label>Tên người chơi<input id="player-name" maxlength="24" autocomplete="off" placeholder="Tên của bạn"></label><div class="avatar-options">${visitorNames.map((name, index) => `<button class="avatar-choice" data-avatar="${index}" aria-pressed="${index === 0}"><span class="avatar-figure" style="--outfit:${visitorColors[index]}"></span>${name}</button>`).join('')}</div><button id="join-room">VÀO PHÒNG CHƠI</button><p id="room-message" aria-live="polite"></p><div id="lobby-roster"></div><p class="lobby-rules">Tự do đi lại, nghe chuyện tùy thích. Tìm biển vàng ? ở 5 khu và chọn câu bất kỳ.<br>Mỗi câu đúng +100 điểm; mỗi câu chỉ trả lời một lần. Giới hạn theo khu: 20 / 15 / 10 / 5 / 5 giây.<br>Đồng hồ bắt đầu khi mở câu và vẫn chạy khi đóng câu hoặc chuyển tab.<br>Quản trò kết thúc phiên. Bằng điểm: tổng thời gian trả lời đúng (ms) thấp hơn xếp trên; bằng cả hai thì đồng hạng.</p></div></div><div id="host-entry" hidden><p class="eyebrow">CHỦ PHÒNG · HCM202</p><p id="host-status" aria-live="polite">Đang kết nối phòng...</p><div id="host-roster"></div><p class="host-guide">Chờ người chơi vào /play rồi bấm BẮT ĐẦU. Giữ tab này mở trong suốt phiên. Bấm KẾT THÚC PHIÊN để chốt điểm và top 5; câu đang mở chưa gửi sẽ không được tính.</p><div class="host-actions"><button id="start-button" disabled>BẮT ĐẦU</button><button id="end-session" hidden>KẾT THÚC PHIÊN</button><button id="new-session" hidden>MỞ PHIÊN MỚI</button><button id="download-results">TẢI KẾT QUẢ GẦN NHẤT</button></div><div id="host-ranking"></div></div>`)
     const applyRoute = () => {
       const host = location.pathname === '/start', competitive = location.pathname === '/play'
       this.root.classList.toggle('host-screen', host)
@@ -114,6 +118,13 @@ export class UI {
       this.q('#quiz-message').textContent = 'Đang chấm điểm…'
       handlers.submitAnswer(stage, index, Number(choice), text)
     }
+    this.root.insertAdjacentHTML('beforeend', '<aside id="question-hunt" hidden aria-label="Tìm câu hỏi"><p class="eyebrow">TỰ DO KHÁM PHÁ</p><p>WASD / phím mũi tên: đi lại · Kéo chuột: nhìn quanh.<br>Tìm biển vàng ? ở các khu. Nghe chuyện là tùy chọn.</p><p id="hunt-location"></p><div id="hunt-grid"></div><button id="resume-question" hidden>MỞ LẠI CÂU ĐANG TRẢ LỜI</button></aside><section id="question-panel" hidden aria-label="Câu hỏi tính điểm"><button id="close-question" class="close" aria-label="Đóng câu hỏi">×</button><p id="question-location" class="eyebrow"></p><p class="question-note">Mỗi câu chỉ một lượt. Đóng khung hoặc đi nơi khác vẫn tính giờ.</p></section>')
+    this.q('#question-panel').append(this.q('#stage-quiz'))
+    this.q('#close-question').onclick = () => { this.q('#question-panel').hidden = true }
+    this.q('#resume-question').onclick = () => { this.q('#question-panel').hidden = false }
+    this.q('#end-session').onclick = handlers.end
+    this.q('#new-session').onclick = handlers.newSession
+    this.q('#download-results').onclick = handlers.downloadResults
     this.q('#new-game').onclick = () => location.reload()
     this.q('#journal-button').onclick = () => { this.renderJournal(); this.openPanel(this.q('#journal'), 'CREDITS') }
     this.q('#zoom-image').onclick = () => {
@@ -137,7 +148,7 @@ export class UI {
     })
     this.q('#start-button').onclick = handlers.start; this.q('#home-button').onclick = handlers.home; this.q('#audio').onclick = () => handlers.mute(); this.q('#narration').onclick = handlers.narration
     this.q('#restart').onclick = handlers.restart; this.q('#credits-button').onclick = handlers.credits; this.q('#transcript-button').onclick = handlers.transcript; this.q('#guided-next').onclick = handlers.nextTourStep; this.q('#guided-exit').onclick = handlers.exitGuided
-    this.root.querySelectorAll('.close').forEach((button) => button.addEventListener('click', handlers.close))
+    this.root.querySelectorAll('.panel .close').forEach((button) => button.addEventListener('click', handlers.close))
     this.q('#continue').onclick = () => this.q('#mobile').classList.add('hidden')
     if (innerWidth < 768) this.q('#mobile').classList.remove('hidden')
   }
@@ -191,7 +202,7 @@ export class UI {
     this.sightseeing = sightseeing; this.root.classList.toggle('sightseeing', sightseeing)
     this.root.classList.toggle('competition-active', !sightseeing && this.state === 'EXPLORING')
     if (sightseeing) {
-      this.q('#scoreboard').hidden = true; this.inRoom = false; this.q('#lobby-roster').replaceChildren()
+      this.q('#scoreboard').hidden = true; this.q('#question-hunt').hidden = true; this.q('#question-panel').hidden = true; this.inRoom = false; this.q('#lobby-roster').replaceChildren()
       this.root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('.lobby input, .avatar-choice, #join-room').forEach(element => element.disabled = false)
     }
     this.q('#journal-title + p').textContent = sightseeing ? 'Khám phá tư liệu và kết nối năm giai đoạn hình thành tư tưởng Hồ Chí Minh.' : 'Khám phá tư liệu và trả lời câu hỏi để kết nối năm giai đoạn.'
@@ -201,68 +212,110 @@ export class UI {
   updateLobby(room: Room, myId: string) {
     const host = room.hostId === myId, me = room.players.find(player => player.id === myId)
     this.setStartAllowed(host && room.phase === 'waiting' && room.players.length > 0)
+    this.q('#start-button').hidden = room.phase !== 'waiting'
+    this.q('#end-session').hidden = !host || room.phase !== 'playing'
+    this.q('#new-session').hidden = !host || room.phase !== 'ended'
     if (location.pathname === '/start') {
-      this.q('#host-status').textContent = host ? (room.phase === 'waiting' ? `${room.players.length} người đã vào phòng HCM202.` : 'Trò chơi đã bắt đầu. Theo dõi bảng điểm trực tiếp.') : 'Một chủ phòng khác đang điều khiển HCM202.'
+      this.q('#host-status').textContent = host ? (room.phase === 'waiting' ? `${room.players.length} người đã vào phòng HCM202.` : room.phase === 'playing' ? 'Phiên đang diễn ra. Người chơi tự do khám phá; bạn có thể kết thúc bất cứ lúc nào.' : 'Đã kết thúc phiên. Kết quả đã được chốt; tải xuống để lưu lâu dài.') : 'Một quản trò khác đang điều khiển HCM202.'
+      this.q('#host-roster').hidden = room.phase !== 'waiting'
     } else if (me) {
       this.inRoom = true
       this.q<HTMLButtonElement>('#join-room').disabled = true; this.q('#join-room').textContent = 'ĐÃ VÀO PHÒNG'
       this.root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('.lobby input, .avatar-choice').forEach(element => element.disabled = true)
-      if (room.phase === 'waiting') this.setLobbyMessage('Đã vào phòng HCM202 — chờ chủ phòng bắt đầu.')
+      if (room.phase === 'waiting') this.setLobbyMessage('Đã vào phòng HCM202 — chờ quản trò bắt đầu.')
     }
     const roster = this.q(host ? '#host-roster' : '#lobby-roster'); roster.replaceChildren()
     for (const player of room.players) { const row = document.createElement('p'); row.textContent = player.name; roster.append(row) }
   }
-  showRoom(room: Room, myId: string) {
-    this.q('#scoreboard').hidden = this.sightseeing; this.q('#score-room').textContent = `PHÒNG ${room.code} · ${room.players.length} NGƯỜI`
-    const me = room.players.find(player => player.id === myId)
-    this.q('#my-score').textContent = me ? `${me.name}: ${me.score} / 3.000 điểm` : ''
-    const list = this.q('#score-players'); list.replaceChildren()
-    const status = { waiting: 'Chờ', playing: 'Đang chơi', lost: 'Thua', finished: 'Hoàn thành' }
-      ;[...room.players].sort((a, b) => b.score - a.score).forEach(player => {
-        const row = document.createElement('div'); row.className = `score-row${player.id === myId ? ' me' : ''}`
-        const dot = document.createElement('span'); dot.style.background = visitorColors[player.avatar]
-        const name = document.createElement('strong'); name.textContent = player.name
-        const points = document.createElement('small'); points.textContent = `${player.score} · ${status[player.status]}`
-        row.append(dot, name, points); list.append(row)
-      })
+  private renderRanking(container: HTMLElement, room: Room, myId: string) {
+    container.replaceChildren()
+    const title = document.createElement('h3'); title.textContent = room.phase === 'ended' ? 'TOP 5 · KẾT QUẢ PHIÊN' : 'TOP 5 · TRỰC TIẾP'
+    const rule = document.createElement('p'); rule.className = 'ranking-rule'; rule.textContent = 'Điểm cao hơn xếp trên. Bằng điểm: tổng thời gian trả lời đúng thấp hơn thắng. Không tính thời gian đi lại / nghe chuyện. Bằng cả điểm và ms: đồng hạng.'
+    const table = document.createElement('table'); table.className = 'ranking-table'
+    table.innerHTML = '<thead><tr><th>Hạng</th><th>Người chơi</th><th>Điểm</th><th>Thời gian đúng (ms)</th></tr></thead>'
+    const body = document.createElement('tbody')
+    for (const player of rankPlayers(room.players).slice(0, 5)) {
+      const row = document.createElement('tr'); row.classList.toggle('me', player.id === myId)
+      for (const value of [playerRank(room.players, player), player.name, player.score, player.correctTimeMs]) { const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell) }
+      body.append(row)
+    }
+    table.append(body); container.append(title, rule, table)
   }
-  showStageQuiz(stage: number, me: Player | undefined, listened: boolean) {
-    const form = this.q('#stage-quiz'); form.hidden = !listened || stage < 0 || stage >= 5 || !me || me.listened < stage + 1
-    if (form.hidden) { this.quizKey = ''; return }
-    const results = me!.answers.slice(stage * 6, stage * 6 + 6)
-    const key = `${stage}:${results.length}`
-    if (this.quizKey === key) return
-    this.quizKey = key; form.dataset.stage = String(stage); form.dataset.index = String(results.length)
-    const container = this.q('#stage-questions'); container.replaceChildren()
-    container.hidden = results.length === 6
-    this.q('#review-answers').hidden = results.length !== 6
-    this.q('#review-answers').textContent = 'XEM KẾT QUẢ 6 CÂU'
-    quizBank[stage].forEach((question, index) => {
-      if (results.length < 6 && index !== results.length) return
-      const section = document.createElement('div'); section.className = 'stage-question'
-      const title = document.createElement('p'); title.textContent = `Câu ${index + 1} / 6. ${question.question}`; section.append(title)
-      question.choices.forEach((choice, value) => {
-        const label = document.createElement('label'), input = document.createElement('input')
-        input.type = 'radio'; input.name = results.length === 6 ? `review-answer-${index}` : 'stage-answer'; input.value = String(value); input.required = true
-        input.disabled = results.length === 6; input.checked = results[index]?.choice === value
-        label.append(input, document.createTextNode(choice)); section.append(label)
+  showRoom(room: Room, myId: string) {
+    const key = `${room.sessionId}:${room.version}:${myId}`
+    if (this.roomKey === key) return
+    this.roomKey = key
+    this.q('#scoreboard').hidden = this.sightseeing || location.pathname === '/start' || room.phase !== 'playing'
+    this.q('#score-room').textContent = `HCM202 · ${room.players.filter(player => player.status === 'playing').length} NGƯỜI ĐANG CHƠI`
+    const me = room.players.find(player => player.id === myId)
+    this.q('#my-score').textContent = me ? `${me.name}: ${me.score} điểm · ${me.answeredCount}/30 câu · ${me.correctTimeMs} ms` : ''
+    const list = this.q('#score-players'); list.replaceChildren()
+    const status = { waiting: 'Chờ', playing: 'Đang chơi', lost: 'Mất kết nối / rời phiên', finished: 'Đã kết thúc' }
+    for (const player of rankPlayers(room.players).slice(0, 5)) {
+      const row = document.createElement('div'); row.className = `score-row${player.id === myId ? ' me' : ''}`
+      const dot = document.createElement('span'); dot.style.background = visitorColors[player.avatar]
+      const name = document.createElement('strong'); name.textContent = `${playerRank(room.players, player)}. ${player.name}`
+      const points = document.createElement('small'); points.textContent = `${player.score}đ · ${player.correctTimeMs} ms · ${status[player.status]}`
+      row.append(dot, name, points); list.append(row)
+    }
+    if (location.pathname === '/start') {
+      this.q('#host-ranking').hidden = room.phase === 'waiting'
+      this.renderRanking(this.q('#host-ranking'), room, myId)
+    }
+  }
+  showCompetitionQuestions(me: Player | undefined, stage: number) {
+    const hunt = this.q('#question-hunt')
+    hunt.hidden = !me || me.status !== 'playing' || this.sightseeing
+    if (hunt.hidden) { this.q('#question-panel').hidden = true; return }
+    const key = `${stage}:${me!.activeQuestion}:${me!.answers.map(answer => answer.index).join(',')}`
+    if (this.huntKey !== key) {
+      this.huntKey = key
+      this.q('#hunt-location').textContent = stage < 0 ? 'Đi tới biển vàng ? để tìm câu hỏi. Bạn được chọn khu bất kỳ.' : `KHU 0${stage + 1} · ${quizStations[stage].label} · ${stageSeconds[stage]} giây/câu. Chọn câu để bắt đầu tính giờ:`
+      const grid = this.q('#hunt-grid'); grid.replaceChildren()
+      if (stage >= 0) quizBank[stage].forEach((_question, index) => {
+        const id = stage * 6 + index, answer = me!.answers.find(answer => answer.index === id)
+        const button = document.createElement('button'); button.dataset.question = String(id)
+        button.textContent = `Câu ${index + 1}${answer ? answer.correct ? ' ✓' : ' ×' : ''}`
+        button.disabled = !!answer || me!.activeQuestion !== null
+        button.onclick = () => this.handlers.openQuestion(id)
+        grid.append(button)
       })
-      if ('manualAnswer' in question) {
-        const other = document.createElement('button'); other.type = 'button'; other.id = results.length === 6 ? `review-other-${index}` : 'answer-other'; other.textContent = 'ĐÁP ÁN KHÁC'; other.setAttribute('aria-pressed', String(results[index]?.choice === 3)); other.disabled = results.length === 6
-        const radio = document.createElement('input'); radio.type = 'radio'; radio.name = results.length === 6 ? `review-answer-${index}` : 'stage-answer'; radio.value = '3'; radio.hidden = true; radio.disabled = results.length === 6; radio.checked = results[index]?.choice === 3
-        const field = document.createElement('label'); field.textContent = 'Nhập năm / số cần trả lời'; field.hidden = true
-        const manual = document.createElement('input'); manual.id = results.length === 6 ? `review-manual-${index}` : 'manual-answer'; manual.type = 'text'; manual.inputMode = 'numeric'; manual.maxLength = 4; manual.pattern = '[0-9]{1,4}'; manual.autocomplete = 'off'; manual.disabled = results.length === 6; manual.value = results[index]?.text ?? ''; field.hidden = results[index]?.choice !== 3; field.append(manual)
-        other.onclick = () => { radio.checked = true; field.hidden = false; manual.required = true; other.setAttribute('aria-pressed', 'true'); manual.focus() }
-        section.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach(input => input.onchange = () => { field.hidden = true; manual.required = false; other.setAttribute('aria-pressed', 'false') })
-        section.append(other, radio, field)
-      }
-      if (results[index]) { const feedback = document.createElement('p'); feedback.className = 'quiz-result'; feedback.textContent = `${results[index].timedOut ? 'Hết giờ · +0 điểm' : results[index].correct ? '✓ Đúng · +100 điểm' : 'Chưa đúng · +0 điểm'}. ${results[index].explanation}`; section.append(feedback) }
-      container.append(section)
+      this.q('#resume-question').hidden = me!.activeQuestion === null
+    }
+    const questionKey = `${me!.activeQuestion}:${me!.answers.length}`
+    if (this.quizKey === questionKey) return
+    this.quizKey = questionKey
+    const form = this.q('#stage-quiz'), container = this.q('#stage-questions')
+    form.hidden = false; container.replaceChildren(); container.hidden = false; this.q('#review-answers').hidden = true
+    const active = me!.activeQuestion
+    this.q('#submit-stage').hidden = active === null
+    this.q<HTMLButtonElement>('#submit-stage').disabled = active === null
+    if (active === null) {
+      const answer = me!.answers.at(-1)
+      this.q('#quiz-message').textContent = answer ? `${answer.timedOut ? 'Hết giờ · +0 điểm' : answer.correct ? 'Đúng · +100 điểm' : 'Chưa đúng · +0 điểm'} · ${answer.elapsedMs} ms. ${answer.explanation} Chọn câu khác tại biển ? hoặc tiếp tục khám phá.` : ''
+      return
+    }
+    const questionStage = Math.floor(active / 6), index = active % 6, question = quizBank[questionStage][index]
+    form.dataset.stage = String(questionStage); form.dataset.index = String(index)
+    this.q('#question-location').textContent = `KHU 0${questionStage + 1} · CÂU ${index + 1}/6`
+    const section = document.createElement('div'); section.className = 'stage-question'
+    const title = document.createElement('p'); title.textContent = question.question; section.append(title)
+    question.choices.forEach((choice, value) => {
+      const label = document.createElement('label'), input = document.createElement('input')
+      input.type = 'radio'; input.name = 'stage-answer'; input.value = String(value); input.required = true
+      label.append(input, document.createTextNode(choice)); section.append(label)
     })
-    this.q('#submit-stage').hidden = results.length === 6
-    this.q<HTMLButtonElement>('#submit-stage').disabled = results.length === 6
-    const previous = results.at(-1)
-    this.q('#quiz-message').textContent = results.length === 6 ? `Đã hoàn thành chặng. ${me!.name}: ${me!.score} điểm.` : previous ? `${previous.timedOut ? 'Câu trước hết giờ' : previous.correct ? 'Câu trước đúng · +100 điểm' : 'Câu trước chưa đúng'}. ${previous.explanation}` : 'Chọn một đáp án và gửi trước khi hết giờ.'
+    if ('manualAnswer' in question) {
+      const other = document.createElement('button'); other.type = 'button'; other.id = 'answer-other'; other.textContent = 'ĐÁP ÁN KHÁC'; other.setAttribute('aria-pressed', 'false')
+      const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'stage-answer'; radio.value = '3'; radio.hidden = true
+      const field = document.createElement('label'); field.textContent = 'Nhập năm / số cần trả lời'; field.hidden = true
+      const manual = document.createElement('input'); manual.id = 'manual-answer'; manual.type = 'text'; manual.inputMode = 'numeric'; manual.maxLength = 4; manual.pattern = '[0-9]{1,4}'; manual.autocomplete = 'off'; field.append(manual)
+      other.onclick = () => { radio.checked = true; field.hidden = false; manual.required = true; other.setAttribute('aria-pressed', 'true'); manual.focus() }
+      section.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach(input => input.onchange = () => { field.hidden = true; manual.required = false; other.setAttribute('aria-pressed', 'false') })
+      section.append(other, radio, field)
+    }
+    container.append(section); this.q('#quiz-message').textContent = 'Chọn đáp án và gửi trước khi hết giờ.'
+    this.q('#question-panel').hidden = false
   }
   updateQuizTimer(deadline: number, now: number) {
     const timer = this.q('#quiz-timer')
@@ -272,6 +325,22 @@ export class UI {
     timer.textContent = `Còn ${seconds} giây`; timer.classList.toggle('urgent', seconds <= 5)
     if (!seconds) this.q<HTMLButtonElement>('#submit-stage').disabled = true
   }
+  showSessionResult(room: Room, myId: string) {
+    const me = room.players.find(player => player.id === myId)
+    this.closePanels(); this.hideLesson(); this.setGuidedTour(false)
+    this.q('#question-hunt').hidden = true; this.q('#question-panel').hidden = true; this.q('#hud').classList.add('hidden')
+    this.q('#result-title').textContent = 'Phiên chơi đã kết thúc'
+    this.q('#result-copy').textContent = me ? `${me.name}: ${me.score} điểm · ${me.correctTimeMs} ms · Hạng ${playerRank(room.players, me)}. Chờ quản trò mở phiên mới.` : 'Quản trò đã chốt kết quả.'
+    let ranking = this.root.querySelector<HTMLElement>('#final-ranking')
+    if (!ranking) { ranking = document.createElement('div'); ranking.id = 'final-ranking'; this.q('#result-copy').after(ranking) }
+    this.renderRanking(ranking, room, myId)
+    this.q('#new-game').hidden = true; this.q('#result-screen').classList.remove('hidden')
+  }
+  resetSession() {
+    this.quizKey = ''; this.huntKey = ''; this.roomKey = ''
+    this.q('#result-screen').classList.add('hidden'); this.q('#question-panel').hidden = true; this.q('#question-hunt').hidden = true
+    this.showHome()
+  }
   markListened(listened: boolean) {
     this.q('#lesson-listen').hidden = listened
     this.q('#narration').classList.toggle('hidden', listened)
@@ -279,6 +348,7 @@ export class UI {
   setLessonInstruction(text: string) { this.q('#lesson-instruction').textContent = text }
   showResult(won: boolean, score: number, reason: string) {
     this.closePanels(); this.hideLesson(); this.setGuidedTour(false)
+    this.q('#question-hunt').hidden = true; this.q('#question-panel').hidden = true
     this.q('#result-title').textContent = won ? 'Hoàn thành hành trình' : 'Lượt chơi kết thúc'
     this.q('#result-copy').textContent = `${reason} Điểm của bạn: ${score} / 3.000.`
     this.q('#result-screen').classList.remove('hidden')
@@ -294,7 +364,7 @@ export class UI {
       const section = document.createElement('section'); section.className = 'learning-card'
       const title = document.createElement('h3'); title.textContent = `0${index + 1} · ${item.title}`; section.append(title)
       const progress = document.createElement('p'); progress.className = 'muted'; progress.textContent = chapters[index].artifacts.map(a => `${this.discovered.has(a.id) ? '✓' : '○'} ${a.title}`).join(' · '); section.append(progress)
-      const detail = document.createElement('p'); detail.textContent = this.sightseeing ? item.explanation : 'Nghe nội dung tại điểm dừng của chặng để mở sáu câu trắc nghiệm tính điểm.'; section.append(detail); container.append(section)
+      const detail = document.createElement('p'); detail.textContent = this.sightseeing ? item.explanation : 'Tìm biển vàng ? trong khu này để chọn một trong sáu câu hỏi. Có thể nghe chuyện trước hoặc trả lời ngay; không cần theo thứ tự.'; section.append(detail); container.append(section)
     })
   }
   setGuidedTour(active: boolean, label = '') { const controls = this.q('#guided-controls'); controls.classList.toggle('visible', active); this.q('#guided-progress').textContent = label }

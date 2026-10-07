@@ -12,38 +12,32 @@ const data = evaluate('src/data/chapters.ts')
 const config = evaluate('src/data/museumConfig.ts')
 const { Experience } = evaluate('src/core/Experience.ts', { '../data/chapters': data, '../data/museumConfig': config })
 const finished = new Set()
-let preview, selected, advanced = 0
+let selected, stopped = 0, advanced = 0
+const button = {}
+const snapshot = { path: data.audioAssets.narration[0], state: 'playing' }
 const experience = Object.create(Experience.prototype)
 Object.assign(experience, {
-  camera: { position: { x: 0, y: 1.68, z: 8 } }, controls: { movementLocked: false }, lessonIndex: -1, guided: false,
-  multiplayer: { me: { listened: -1, answers: [] }, send() {} },
-  audio: { hasCompleted: path => finished.has(path), selectNarration: path => selected = path, stopNarration() {}, fadeOutNarration: () => Promise.resolve() },
-  ui: { setNarrationControl() {}, showLesson: (...args) => preview = args, setTourNextEnabled() {}, markListened() {}, showStageQuiz() {}, setLessonInstruction() {} }
+  camera: { position: { x: 0, y: 1.68, z: 8 } }, controls: { movementLocked: true }, lessonIndex: -1, guided: false, gameActive: true,
+  audio: { snapshot, hasCompleted: path => finished.has(path), selectNarration: path => selected = path, stopNarration() { stopped++ }, fadeOutNarration: () => Promise.resolve() },
+  ui: { q: () => button, setNarrationControl() {}, showLesson() {}, hideLesson() {}, setTourNextEnabled() {}, markListened() {}, setLessonInstruction() {} }
 })
 experience.updateNarrationZone()
-assert.equal(experience.controls.movementLocked, true)
-assert.equal(selected, data.audioAssets.narration[0])
-assert.equal(preview[1], false)
-// Stopping, pausing or failing to load cannot add a completion record.
-experience.audio.stopNarration(); experience.refreshLesson()
-assert.equal(experience.controls.movementLocked, true)
-finished.add(selected); experience.refreshLesson()
-assert.equal(experience.controls.movementLocked, true, 'Must wait for server acknowledgement')
-experience.multiplayer.me.listened = 0; experience.refreshLesson()
 assert.equal(experience.controls.movementLocked, false)
-assert.equal(preview[1], true)
-assert.equal(preview[2][0].id, 'que-huong')
-// Even an overshoot is clamped back to the next mandatory listening point.
-experience.camera.position.z = -12
+assert.equal(stopped, 0)
+// Skip four areas without finishing audio or answering any questions.
+experience.camera.position.z = -50
 experience.updateNarrationZone()
-assert.equal(experience.camera.position.z, -6)
-assert.equal(experience.controls.movementLocked, true)
-assert.equal(selected, data.audioAssets.narration[1])
-Object.assign(experience, { guided: true, tourPaused: false, guidedPhase: 'waiting', guidedIndex: 0, guidedSteps: [{ narration: selected }], advanceGuidedStep: () => advanced++ })
+assert.equal(experience.camera.position.z, -50)
+assert.equal(experience.lessonIndex, 5)
+assert.equal(experience.controls.movementLocked, false)
+assert.equal(stopped, 0, 'Playing story continues when moving to another area')
+assert.equal(selected, undefined, 'Zone change must not replace the selected story')
+experience.camera.position.z = -8
+experience.updateNarrationZone()
+assert.equal(experience.lessonIndex, 1)
+assert.equal(experience.controls.movementLocked, false)
+Object.assign(experience, { sightseeing: true, gameActive: false, guided: true, tourPaused: false, guidedPhase: 'waiting', guidedIndex: 0, guidedSteps: [{ narration: data.audioAssets.narration[1] }], advanceGuidedStep: () => advanced++ })
 experience.ui.panelOpen = false
-experience.nextGuidedStep(); assert.equal(advanced, 0)
-finished.add(selected); experience.multiplayer.me.listened = 1
-experience.nextGuidedStep(); assert.equal(advanced, 0, 'Quiz must also be completed')
-experience.multiplayer.me.answers = [{}, {}, {}, {}, {}, {}]
-experience.nextGuidedStep(); assert.equal(advanced, 1)
-console.log('PASS: listening gate, server acknowledgement, six answers required, overshoot clamp, guided Next requires completion')
+experience.nextGuidedStep()
+assert.equal(advanced, 1, 'Guided visitors can still skip optional narration')
+console.log('PASS: free movement without listening gates, arbitrary areas, uninterrupted story and optional guided narration')

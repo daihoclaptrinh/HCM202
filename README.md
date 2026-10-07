@@ -71,3 +71,18 @@ Bảy tệp narration dự kiến:
 ## Hiệu năng
 
 Pixel ratio giới hạn ở `1.5`, post-processing không được sử dụng, geometry/material được giữ đơn giản và chỉ một số đèn đổ bóng. CanvasTexture chỉ được tạo lúc dựng cảnh. Trên máy yếu có thể hạ pixel ratio trong `Experience.ts` hoặc tắt shadow của spotlight trung tâm.
+
+## Chơi tự do và quản trò
+
+- Quản trò mở `/start`, giữ tab mở; người chơi mở `/play`, nhập tên và chọn nhân vật. Quản trò bấm **BẮT ĐẦU** khi mọi người đã vào phòng.
+- Người chơi dùng WASD / phím mũi tên để đi, kéo chuột để nhìn quanh, E để xem hiện vật. Các nhân vật và tên được đồng bộ trong cùng phòng.
+- Có thể đi tới bất kỳ khu nào, nghe chuyện hoặc bỏ qua. Câu chuyện đã bật vẫn tiếp tục khi đi sang khu khác.
+- Tìm biển vàng **?** ở đầu năm khu trưng bày. Đến gần biển để chọn bất kỳ câu nào trong sáu câu của khu đó. Q đưa tiêu điểm tới danh sách câu hoặc mở lại câu đang trả lời.
+- Mỗi câu chỉ trả lời một lần, đúng được 100 điểm. Thời hạn theo khu 1–5 là 20 / 15 / 10 / 5 / 5 giây. Chỉ bắt đầu tính giờ khi mở câu; đóng khung, đi nơi khác hay chuyển tab không đặt lại đồng hồ. Hết giờ chỉ chốt câu đang mở, không tự mở câu tiếp theo.
+- Quản trò bấm **KẾT THÚC PHIÊN** để chốt kết quả cho tất cả người chơi. Câu chưa gửi tại thời điểm kết thúc không được tính. Làm đủ 30 câu vẫn có thể tiếp tục tham quan cho đến khi quản trò kết thúc.
+- Xếp hạng: điểm giảm dần, sau đó tổng `elapsedMs` của **các câu đúng** tăng dần. Không tính thời gian đi lại hay nghe. Bằng cả điểm và thời gian thì đồng hạng; bảng hiển thị tối đa năm người, file kết quả gồm toàn bộ người chơi.
+- Mỗi lượt trả lời lưu mã câu, thời điểm mở/gửi, thời gian nguyên mili giây và kết quả đúng/sai/hết giờ. Thời gian do đồng hồ của máy quản trò ghi nhận khi nhận lệnh mở và gửi câu, vì vậy bao gồm độ trễ truyền tin. Client không quyết định điểm hoặc thời gian.
+- Kết quả phiên gần nhất được lưu trong trình duyệt của quản trò. Bấm **TẢI KẾT QUẢ GẦN NHẤT** để tải JSON gồm bảng xếp hạng và từng lượt trả lời; bấm **MỞ PHIÊN MỚI** để đưa người đang kết nối về phòng chờ và đặt lại điểm. Chưa có cơ sở dữ liệu lưu lịch sử phiên trên máy chủ.
+- Tab quản trò điều phối phiên qua Supabase Realtime. Đóng/mất kết nối tab này sẽ ngắt phiên; người vào sau khi bắt đầu chờ phiên tiếp theo. Sau cập nhật, mọi người cần tải lại trang để dùng cùng phiên bản.
+
+Kiểm tra luật chơi: `npm run check:room`. Kiểm tra trình duyệt với `npm run dev` đang chạy: `npm run check:game` (mặc định dùng bộ truyền tin thử nghiệm); đặt `MOCK_REALTIME=0` để thử Supabase thật trên kênh riêng. Có thể đặt `BROWSER_PATH` để chọn Chrome/Chromium.

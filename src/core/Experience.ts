@@ -9,6 +9,7 @@ import { Museum } from '../world/Museum'
 import { Controls } from './Controls'
 import { Multiplayer, type Room } from '../systems/Multiplayer'
 import { Visitors } from '../world/Visitors'
+import { quizStations, stationRadius } from '../data/quizStations'
 
 type GuidedStep = { label: string; position: THREE.Vector3; target: THREE.Vector3; narration?: string; waitForNarration?: boolean; duration?: number; finalRotation?: boolean }
 
@@ -43,6 +44,7 @@ export class Experience {
   private positionTimer = 0
   private reportedLessons = new Set<number>()
   private roomSignature = ''
+  private sessionId = ''
   private visitMode: 'free' | 'guided' = 'free'
   private guidedSteps: GuidedStep[] = []
   private guidedIndex = -1
@@ -63,11 +65,20 @@ export class Experience {
     this.ui = new UI({
       visit: mode => this.startVisitor(mode),
       start: () => this.startHost(),
+      end: () => this.multiplayer.send({ type: 'end' }),
+      newSession: () => this.multiplayer.send({ type: 'reset' }),
+      downloadResults: () => this.multiplayer.downloadResults(),
+      openQuestion: index => {
+        if (!this.gameActive) return
+        this.multiplayer.send({ type: 'position', x: this.camera.position.x, z: this.camera.position.z, yaw: this.camera.rotation.y })
+        this.multiplayer.send({ type: 'openQuestion', index })
+      },
       host: () => this.multiplayer.joinHost(),
       home: () => this.home(),
       close: () => this.closePanels(),
       mute: () => this.audio.toggleMute(),
-      narration: () => this.toggleNarration(),
+      narration: () => { if (this.gameActive) void this.audio.toggleNarration(); else this.toggleNarration() },
+      listenHere: () => this.toggleNarration(),
       transcript: () => this.openTranscript(),
       credits: () => this.openCredits(),
       restart: () => this.restart(),
@@ -85,11 +96,18 @@ export class Experience {
         await this.multiplayer.join(name, avatar)
       },
       submitAnswer: (stage, index, choice, text) => {
-        if (!this.gameActive || stage !== this.lessonIndex - 1 || !this.audio.hasCompleted(audioAssets.narration[this.lessonIndex])) return
+        if (!this.gameActive || this.multiplayer.me?.activeQuestion !== stage * 6 + index) return
         this.multiplayer.send({ type: 'answer', index: stage * 6 + index, choice, text })
       }
     })
-    this.audio.subscribe((snapshot) => { this.guidedNarrationState = snapshot.state; this.ui.updateAudio(snapshot); this.refreshLesson() })
+    this.audio.subscribe((snapshot) => {
+      this.guidedNarrationState = snapshot.state; this.ui.updateAudio(snapshot)
+      if (snapshot.completed && snapshot.path && this.gameActive) {
+        const index = audioAssets.narration.indexOf(snapshot.path)
+        if (index >= 0 && !this.reportedLessons.has(index)) { this.reportedLessons.add(index); this.multiplayer.send({ type: 'listen', index }) }
+      }
+      this.refreshLesson()
+    })
     this.renderer = new THREE.WebGLRenderer({ canvas: this.ui.q<HTMLCanvasElement>('#museum-canvas'), antialias: true, powerPreference: 'high-performance' })
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); this.renderer.setSize(innerWidth, innerHeight)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.08
@@ -118,7 +136,7 @@ export class Experience {
   private beginGame(mode: 'free' | 'guided') {
     if (this.gameActive || this.started || this.eliminated) return
     this.sightseeing = false; this.ui.setVisitMode(false)
-    this.gameActive = true
+    this.gameActive = true; this.museum.quizMarkers.visible = true; this.audio.setMuted(false)
     const spawn = this.multiplayer.me?.position
     if (spawn) this.camera.position.set(spawn.x, config.player.eyeHeight, spawn.z)
     this.visitMode = mode
@@ -130,7 +148,7 @@ export class Experience {
 
   private startVisitor(mode: 'free' | 'guided') {
     if (this.gameActive) return
-    this.multiplayer.leave(); this.visitors.update([], '')
+    this.multiplayer.leave(); this.visitors.update([], ''); this.museum.quizMarkers.visible = false
     this.sightseeing = true; this.ui.setVisitMode(true); this.restart(false)
     this.visitMode = mode; this.started = true; this.guided = mode === 'guided'
     this.controls.enabled = !this.guided; this.ui.explore(); this.ui.setHomeControl(true)
@@ -149,8 +167,10 @@ export class Experience {
     } else this.controls.update(delta)
     if (this.started) {
       this.updateChapter(); if (!this.guided) this.updateNarrationZone(); this.updateAmbient(); this.updateInteraction()
+      if (this.gameActive) this.ui.showCompetitionQuestions(this.multiplayer.me, this.nearbyQuestionStage())
       this.museum.updateTransitionDoor(this.camera.position.z, delta, this.reducedMotion); if (this.guided) this.updateFinal()
     }
+    this.visitors.animate(delta, this.camera.position)
     this.renderer.render(this.scene, this.camera)
     if (this.gameActive) {
       this.positionTimer += delta
@@ -338,7 +358,6 @@ export class Experience {
     if (!this.guided || this.tourPaused || this.ui.panelOpen) return
     const step = this.guidedSteps[this.guidedIndex]
     if (!step) return
-    if (!this.sightseeing && this.guidedPhase !== 'moving' && step.narration && !this.lessonComplete(audioAssets.narration.indexOf(step.narration))) return
 
     if (this.guidedPhase === 'moving') {
       if (this.guidedSpeedMultiplier === 1) {
@@ -500,81 +519,74 @@ export class Experience {
   }
 
   private updateNarrationZone() {
-    if (this.sightseeing) {
-      this.controls.movementLocked = false
-      const z = this.camera.position.z
-      const chapter = chapters.findIndex(chapter => z <= chapter.start && z >= chapter.end)
-      const index = z > chapters[0].start ? 0 : chapter >= 0 ? chapter + 1 : z < config.corridor.end ? 6 : -1
-      if (index === this.lessonIndex) return
-      this.lessonIndex = index; this.boardCandidate = chapter
+    this.controls.movementLocked = false
+    const z = this.camera.position.z
+    const chapter = chapters.findIndex(chapter => z <= chapter.start && z >= chapter.end)
+    const index = z > chapters[0].start ? 0 : chapter >= 0 ? chapter + 1 : z < config.corridor.end ? 6 : -1
+    if (index === this.lessonIndex) return
+    this.lessonIndex = index; this.boardCandidate = chapter
+    if (this.gameActive) {
+      // A selected story keeps playing while the player explores another area.
+      if (index < 0) { this.ui.hideLesson(); return }
+      this.refreshLesson()
+    } else {
       this.audio.stopNarration()
       if (index < 0) { this.ui.hideLesson(); this.ui.setNarrationControl(false); return }
       this.audio.selectNarration(audioAssets.narration[index]); this.ui.setNarrationControl(true); this.refreshLesson()
-      if (index === 6) this.revealFinalHall()
-      return
     }
-    const pending = audioAssets.narration.findIndex((_path, index) => !this.lessonComplete(index))
-    if (pending < 0) { this.controls.movementLocked = false; return }
-    const chapter = chapters[pending - 1]
-    const stopZ = pending === 0 ? 8 : chapter ? (chapter.start + chapter.end) / 2 + 2 : config.hall.centerZ + 2.45
-    if (this.camera.position.z > stopZ) { this.controls.movementLocked = false; return }
-    this.camera.position.z = stopZ
-    this.controls.movementLocked = true
-    if (this.lessonIndex === pending) return
-    this.lessonIndex = pending
-    this.boardCandidate = chapter ? pending - 1 : -1
-    this.audio.stopNarration(); this.audio.selectNarration(audioAssets.narration[pending])
-    this.ui.setNarrationControl(true); this.refreshLesson()
-    if (pending === chapters.length + 1) this.revealFinalHall()
+    if (index === 6) this.revealFinalHall()
+  }
+
+  private nearbyQuestionStage() {
+    if (!this.gameActive) return -1
+    return quizStations.findIndex(station => Math.hypot(this.camera.position.x - station.x, this.camera.position.z - station.z) <= stationRadius - .15)
   }
 
   private refreshLesson() {
     if (this.lessonIndex < 0) return
-    const path = audioAssets.narration[this.lessonIndex]
-    const listened = this.audio.hasCompleted(path)
-    if (listened && this.gameActive && !this.reportedLessons.has(this.lessonIndex)) {
-      this.reportedLessons.add(this.lessonIndex); this.multiplayer.send({ type: 'listen', index: this.lessonIndex })
-    }
-    const complete = this.lessonComplete(this.lessonIndex)
-    if (this.controls) this.controls.movementLocked = !this.sightseeing && !complete
+    const path = audioAssets.narration[this.lessonIndex], listened = this.audio.hasCompleted(path)
+    if (this.controls) this.controls.movementLocked = false
     const chapter = chapters[this.lessonIndex - 1]
     const title = this.lessonIndex === 0 ? 'Mở đầu hành trình' : chapter ? chapter.period : 'Kết luận'
-    const upcoming = (chapter ?? chapters[0]).artifacts
-    this.ui.showLesson(title, this.sightseeing || complete, this.lessonIndex <= chapters.length ? upcoming : [], this.guided)
+    this.ui.showLesson(title, true, this.gameActive ? [] : (chapter ?? chapters[0]).artifacts, this.guided)
     this.ui.markListened(listened)
-    this.ui.showStageQuiz(this.sightseeing ? -1 : this.lessonIndex - 1, this.multiplayer.me, listened)
+    this.ui.setLessonInstruction(listened ? 'Đã nghe xong. Bạn có thể tự do khám phá các khu khác.' : 'Nghe chuyện là tùy chọn. Bạn vẫn được đi lại và tìm câu hỏi ở bất kỳ khu nào.')
     if (this.sightseeing) this.ui.setLessonInstruction(listened ? 'Đã nghe xong. Tiếp tục khám phá theo nhịp của bạn.' : 'Bấm nghe để tìm hiểu thêm, hoặc tiếp tục tham quan khi bạn muốn.')
-    else if (listened && !complete) this.ui.setLessonInstruction('Đã nghe xong. Trả lời lần lượt 6 câu để mở chặng tiếp theo. Hết giờ tính sai.')
-    else if (!listened && this.gameActive) this.ui.setLessonInstruction('Nghe hết nội dung để mở câu hỏi. Hành trình sẽ tự chuyển sang chặng tiếp theo khi hoàn thành.')
-    this.ui.setTourNextEnabled(this.sightseeing || !this.guided || complete)
-    if (this.lessonIndex === 6 && complete && this.gameActive) this.multiplayer.send({ type: 'finish' })
-    else if (complete && this.gameActive && this.guided && this.guidedPhase === 'waiting' && this.guidedSteps[this.guidedIndex]?.narration === path) this.advanceGuidedStep()
-  }
-
-  private lessonComplete(index: number) {
-    if (!this.audio.hasCompleted(audioAssets.narration[index])) return false
-    if (this.sightseeing) return true
-    const me = this.multiplayer.me
-    return !!me && me.listened >= index && (index === 0 || index === 6 || me.answers.length >= index * 6)
+    if (this.gameActive) {
+      this.ui.setNarrationControl(!!this.audio.snapshot.path)
+      const button = this.ui.q<HTMLButtonElement>('#lesson-listen')
+      button.hidden = listened
+      if (this.audio.snapshot.path !== path || this.audio.snapshot.state === 'idle') { button.disabled = false; button.textContent = '▶ NGHE CHUYỆN KHU NÀY' }
+    }
+    this.ui.setTourNextEnabled(true)
   }
 
   private updateRoom(room: Room) {
     if (this.sightseeing) return
+    if (this.sessionId && this.sessionId !== room.sessionId && room.phase === 'waiting') {
+      this.gameActive = false; this.started = false; this.eliminated = false
+      this.reportedLessons.clear(); this.roomSignature = ''; this.restart(false); this.audio.setMuted(false); this.ui.resetSession()
+    }
+    this.sessionId = room.sessionId
     this.ui.showRoom(room, this.multiplayer.id)
     this.visitors?.update(room.players, this.multiplayer.id)
     this.ui.q('#museum-canvas').dataset.visitors = String(this.visitors?.count ?? 0)
     this.ui.updateLobby(room, this.multiplayer.id)
     const me = this.multiplayer.me
-    if (!me) return
-    if (room.phase === 'playing' && me.status === 'playing' && !this.gameActive && !this.started) this.beginGame('guided')
-    if (me.status === 'lost') { this.loseGame(me.reason ?? 'Lượt chơi đã kết thúc.'); return }
-    if (me.status === 'finished' && this.gameActive) {
-      this.gameActive = false; this.started = false; this.audio.stopNarration(); this.audio.setMuted(true)
-      this.guided = false; this.controls.enabled = false; this.ui.showResult(true, me.score, 'Bạn đã nghe nội dung và hoàn thành 30 câu hỏi.')
+    if (room.phase === 'ended') {
+      const key = `${room.sessionId}:ended`
+      if (this.roomSignature !== key) {
+        this.roomSignature = key; this.gameActive = false; this.started = false; this.guided = false
+        this.controls.enabled = false; this.audio.stopNarration(); this.audio.setMuted(true)
+        if (me) this.ui.showSessionResult(room, this.multiplayer.id)
+      }
       return
     }
-    const signature = `${me.listened}:${me.answers.length}`
-    if (signature !== this.roomSignature) { this.roomSignature = signature; this.refreshLesson() }
+    if (!me) return
+    if (room.phase === 'playing' && me.status === 'playing' && !this.gameActive && !this.started) this.beginGame('free')
+    if (me.status === 'lost') { this.loseGame(me.reason ?? 'Lượt chơi đã kết thúc.'); return }
+    const signature = `${me.activeQuestion}:${me.answers.length}:${me.listened.join(',')}`
+    if (signature !== this.roomSignature) { this.roomSignature = signature; this.refreshLesson(); this.ui.showCompetitionQuestions(me, this.nearbyQuestionStage()) }
   }
 
   private loseGame(reason: string) {
@@ -623,7 +635,12 @@ export class Experience {
     if (!this.started || event.target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.target.isContentEditable)) return
     if (event.code === 'Escape') {
       if (this.ui.panelOpen) this.closePanels()
+      else if (!this.ui.q('#question-panel').hidden) this.ui.q('#question-panel').hidden = true
       else if (this.guided) this.exitGuided()
+    }
+    if (event.code === 'KeyQ' && this.gameActive) {
+      if (this.multiplayer.me?.activeQuestion !== null) this.ui.q('#question-panel').hidden = false
+      else this.ui.root.querySelector<HTMLButtonElement>('#hunt-grid button:not(:disabled)')?.focus()
     }
     if (event.code === 'KeyM') this.audio.toggleMute()
     if (event.code === 'KeyE' && this.nearbyIndex >= 0 && !this.ui.panelOpen) {
@@ -643,6 +660,8 @@ export class Experience {
   private openTranscript() { const context = this.transcriptContext(); this.ui.showTranscript(context.title, context.transcript) }
   private toggleNarration() {
     if ((!this.gameActive && !this.sightseeing) || this.lessonIndex < 0 || this.audio.hasCompleted(audioAssets.narration[this.lessonIndex])) return
+    const path = audioAssets.narration[this.lessonIndex]
+    if (this.audio.snapshot.path !== path) { this.audio.stopNarration(); this.audio.selectNarration(path) }
     void this.audio.toggleNarration()
   }
   private closePanels() { this.ui.closePanels() }
